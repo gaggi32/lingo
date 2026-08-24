@@ -1,0 +1,73 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Lingo",
+  "version": "0.1.0",
+  "identifier": "com.lingo.translate",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1430",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Lingo",
+        "url": "index.html",
+        "width": 980,
+        "height": 700,
+        "minWidth": 760,
+        "minHeight": 520,
+        "resizable": true,
+        "center": true,
+        "visible": false
+      },
+      {
+        "label": "pop",
+        "title": "Lingo",
+        "url": "pop.html",
+        "width": 560,
+        "height": 152,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "center": true,
+        "visible": false,
+        "shadow": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Pop-up translator powered by DeepL",
+    "longDescription": "Lingo puts DeepL one keystroke away: hit the hotkey, a small card appears with whatever is on your clipboard already translated, and it disappears the moment you click away.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "both"
+      }
+    },
+    "linux": {
+      "deb": {
+        "section": "utils"
+      }
+    }
+  },
+  "plugins": {}
+}

@@ -1,0 +1,282 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ----------------------------------------------------------------------------
+ * Shared surfaces.
+ *
+ * Lingo's look is "ink on paper": a warm-white sheet in light mode, near-black
+ * slate in dark, with one iris accent that only ever marks the thing you are
+ * about to act on. Defined once here so the pop-up card and the desk window
+ * read as the same object at two sizes.
+ * ------------------------------------------------------------------------- */
+@layer components {
+  .app-bg {
+    @apply bg-gradient-to-b from-white via-slate-50 to-slate-100;
+    @apply dark:from-slate-950 dark:via-slate-950 dark:to-slate-900;
+  }
+
+  /* Cards, popovers, inputs. */
+  .sheet {
+    @apply border border-slate-200/90 bg-white/90 shadow-sm shadow-slate-950/[0.04] backdrop-blur-sm;
+    @apply dark:border-slate-700/70 dark:bg-slate-900/85 dark:shadow-black/25;
+  }
+
+  /* The filled accent: translate button, active nav item, the app mark. */
+  .accent {
+    @apply bg-gradient-to-b from-iris-500 to-iris-700 text-white shadow-sm shadow-iris-900/30 ring-1 ring-inset ring-white/20;
+    @apply dark:from-iris-400 dark:to-iris-600 dark:shadow-black/40;
+  }
+  .accent-hover {
+    @apply enabled:hover:from-iris-400 enabled:hover:to-iris-600;
+    @apply dark:enabled:hover:from-iris-300 dark:enabled:hover:to-iris-500;
+  }
+
+  /* Tinted accent: language pills, the detected-language badge. */
+  .accent-soft {
+    @apply bg-iris-50 text-iris-700 ring-1 ring-inset ring-iris-500/20;
+    @apply dark:bg-iris-500/15 dark:text-iris-200 dark:ring-iris-400/25;
+  }
+
+  /* Text inputs and textareas. */
+  .field {
+    @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[14px] text-slate-900 outline-none transition;
+    @apply placeholder:text-slate-400 focus:border-iris-400 focus:ring-4 focus:ring-iris-500/15;
+    @apply dark:border-slate-700 dark:bg-slate-900 dark:text-slate-50 dark:placeholder:text-slate-500 dark:focus:border-iris-400;
+  }
+
+  /* Quiet secondary button. */
+  .ghost {
+    @apply inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-slate-500 transition-colors;
+    @apply hover:bg-slate-900/[0.06] hover:text-slate-800;
+    @apply dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-slate-100;
+  }
+}
+
+/* ----------------------------------------------------------------------------
+ * The pop-up window is borderless and transparent; the card inside defines the
+ * entire visible surface. `html.pop` is set in pop.html only, so the desk
+ * window keeps a normal opaque background.
+ * ------------------------------------------------------------------------- */
+html.pop,
+html.pop body,
+html.pop #root {
+  background: transparent;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+html.pop {
+  user-select: none;
+}
+html.pop input,
+html.pop textarea,
+html.pop [data-selectable] {
+  user-select: text;
+}
+
+/* ----------------------------------------------------------------------------
+ * Unfurl: the pop-up's entrance.
+ *
+ * The card arrives as a thin bright strip on the accent spine and unrolls
+ * downward — a slip of paper pulled out rather than a box fading in. Re-keying
+ * the element in React replays it on every summon.
+ * ------------------------------------------------------------------------- */
+@keyframes unfurl {
+  0% {
+    opacity: 0;
+    transform: scaleY(0.06) translateY(-10px);
+    filter: blur(6px);
+  }
+  55% {
+    opacity: 1;
+    transform: scaleY(1.03) translateY(0);
+    filter: blur(0);
+  }
+  78% {
+    transform: scaleY(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleY(1);
+    filter: blur(0);
+  }
+}
+
+/* The accent spine draws itself top-to-bottom just behind the unrolling card. */
+@keyframes spine-draw {
+  0% {
+    transform: scaleY(0);
+  }
+  100% {
+    transform: scaleY(1);
+  }
+}
+
+/* Contents settle a beat after the sheet lands. */
+@keyframes settle {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.unfurl {
+  animation: unfurl 340ms cubic-bezier(0.2, 1.1, 0.35, 1) both;
+  transform-origin: top center;
+  will-change: transform, opacity, filter;
+}
+
+.spine {
+  animation: spine-draw 420ms cubic-bezier(0.2, 1, 0.35, 1) both;
+  transform-origin: top center;
+}
+
+.settle {
+  animation: settle 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 90ms;
+}
+
+/* Translated text resolves out of a blur, the way ink stops bleeding. */
+@keyframes ink-in {
+  0% {
+    opacity: 0;
+    filter: blur(5px);
+    transform: translateY(3px);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+.ink-in {
+  animation: ink-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Indeterminate progress: one accent sliver sweeping the divider. */
+@keyframes scan {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+.scan::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 25%;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    theme("colors.iris.500"),
+    transparent
+  );
+  animation: scan 1100ms linear infinite;
+}
+
+/* Soft pop for menus and language pickers. */
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.pop-in {
+  animation: pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: top center;
+}
+
+/* Brief confirmation after a copy. */
+@keyframes confirm {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.92);
+  }
+  18%,
+  74% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.98);
+  }
+}
+.confirm {
+  animation: confirm 1300ms ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .unfurl,
+  .spine,
+  .settle,
+  .ink-in,
+  .pop-in,
+  .confirm,
+  .scan::after {
+    animation: none !important;
+  }
+  .scan::after {
+    display: none;
+  }
+}
+
+/* Quiet scrollbars. */
+.tidy-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(0 0 0 / 0.18) transparent;
+}
+.tidy-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.tidy-scroll::-webkit-scrollbar-thumb {
+  background: rgb(0 0 0 / 0.16);
+  border-radius: 9999px;
+}
+.tidy-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgb(0 0 0 / 0.28);
+}
+@media (prefers-color-scheme: dark) {
+  .tidy-scroll {
+    scrollbar-color: rgb(255 255 255 / 0.18) transparent;
+  }
+  .tidy-scroll::-webkit-scrollbar-thumb {
+    background: rgb(255 255 255 / 0.16);
+  }
+  .tidy-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgb(255 255 255 / 0.3);
+  }
+}
+
+/* Textareas that grow with their content should never show a resize grip. */
+textarea {
+  resize: none;
+}
