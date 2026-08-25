@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  Languages,
+  KeyStatus,
+  Language,
   Settings,
   Translation,
   Usage,
@@ -9,9 +10,10 @@ import type {
 /**
  * Every call into Rust, in one place.
  *
- * Nothing here talks to DeepL directly: the key stays on the Rust side, and
- * DeepL sends no CORS headers, so a fetch from the webview would be refused
- * even if we wanted to.
+ * Nothing here talks to Google directly, and nothing here ever holds the API
+ * key. The key is written once with {@link setApiKey}, after which it lives
+ * only in Rust: translations name a language pair and some text, and Rust
+ * supplies the credential. A webview cannot read it back, which is the point.
  */
 
 export const getSettings = (): Promise<Settings> => invoke("get_settings");
@@ -19,29 +21,45 @@ export const getSettings = (): Promise<Settings> => invoke("get_settings");
 export const saveSettings = (next: Settings): Promise<Settings> =>
   invoke("save_settings", { next });
 
-export const hasKey = (): Promise<boolean> => invoke("has_key");
+// ---- The key ----------------------------------------------------------------
 
-export const keyIsFree = (): Promise<boolean> => invoke("key_is_free");
+/** Whether a key is saved, and the last four characters of it. Never the key. */
+export const keyStatus = (): Promise<KeyStatus> => invoke("key_status");
+
+/** Store a key. Not checked here — call {@link verifyKey} for that. */
+export const setApiKey = (key: string): Promise<KeyStatus> =>
+  invoke("set_api_key", { key });
+
+export const clearApiKey = (): Promise<KeyStatus> => invoke("clear_api_key");
+
+/**
+ * Prove the saved key works, and resolve with how many languages Google offers
+ * it. Costs nothing: the languages endpoint is not billed.
+ */
+export const verifyKey = (): Promise<number> => invoke("verify_key");
+
+// ---- Translating ------------------------------------------------------------
 
 /** Index signature so `invoke` accepts it directly as its argument record. */
 export interface TranslateRequest extends Record<string, unknown> {
   text: string;
   sourceLang: string;
   targetLang: string;
-  formality: string;
 }
 
 export const translate = (req: TranslateRequest): Promise<Translation> =>
   invoke("translate_text", req);
 
-/** Test a key the user has typed but not saved. Resolves with its usage. */
-export const verifyKey = (key: string): Promise<Usage> =>
-  invoke("verify_key", { key });
+/** Google's own list of what it will translate. Needs a working key. */
+export const listLanguages = (): Promise<Language[]> => invoke("list_languages");
 
-export const fetchUsage = (): Promise<Usage> => invoke("deepl_usage");
+/** Lingo's own count of what this month has cost, and the free tier it eats. */
+export const fetchUsage = (): Promise<Usage> => invoke("usage_today");
 
-export const fetchLanguages = (): Promise<Languages> =>
-  invoke("deepl_languages");
+/** Longest text Lingo will translate in one go, as Rust defines it. */
+export const maxCharacters = (): Promise<number> => invoke("max_characters");
+
+// ---- Windows ----------------------------------------------------------------
 
 export const hidePop = (): Promise<void> => invoke("hide_pop");
 
@@ -57,5 +75,5 @@ export const resumeShortcut = (): Promise<void> => invoke("resume_shortcut");
 export function errorText(err: unknown): string {
   if (typeof err === "string") return err;
   if (err instanceof Error) return err.message;
-  return "Something went wrong talking to DeepL.";
+  return "Something went wrong talking to Google.";
 }

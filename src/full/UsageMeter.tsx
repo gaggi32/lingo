@@ -1,86 +1,91 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchUsage, keyIsFree } from "../lib/api";
-import { onHistoryChanged } from "../lib/events";
+import { fetchUsage } from "../lib/api";
+import { onKeyChanged, onUsageChanged } from "../lib/events";
 import type { Usage } from "../lib/types";
 
 /**
- * This billing period's character usage, as DeepL reports it.
+ * How much of this month's free tier is gone, and what the overflow costs.
  *
- * Pro keys without a hard cap come back with an implausibly large limit, so the
- * bar is only drawn when the number looks like a real allowance.
+ * Google bills the Cloud Translation API by the character — the first 500,000
+ * each calendar month free, $20 per million after that — and publishes no
+ * running total: the real figure lives in Cloud Billing, hours behind. So this
+ * is Lingo's own tally of what it has sent, which is close but not
+ * authoritative: anything else on the same project spends the same free tier.
+ * The footnote says so rather than letting the bar imply a precision it does
+ * not have.
  */
-const PLAUSIBLE_LIMIT = 1e11;
 
 const fmt = new Intl.NumberFormat();
+const money = new Intl.NumberFormat(undefined, {
+  style: "currency",
+  currency: "USD",
+});
 
-export default function UsageMeter({ apiKey }: { apiKey: string }) {
+export default function UsageMeter() {
   const [usage, setUsage] = useState<Usage | null>(null);
-  const [free, setFree] = useState(false);
 
   const refresh = useCallback(() => {
-    if (!apiKey.trim()) {
-      setUsage(null);
-      return;
-    }
     fetchUsage()
       .then(setUsage)
       .catch(() => setUsage(null));
-    keyIsFree()
-      .then(setFree)
-      .catch(() => {});
-  }, [apiKey]);
+  }, []);
 
   useEffect(refresh, [refresh]);
 
-  // A saved translation means characters were just spent; keep the meter honest.
+  // The pop-up spends most of the allowance, and it is a different webview.
+  // Rust announces every translation so this meter hears about them.
   useEffect(() => {
-    const un = onHistoryChanged(refresh);
+    const un = Promise.all([onUsageChanged(refresh), onKeyChanged(refresh)]);
     return () => {
-      un.then((f) => f());
+      un.then((fns) => fns.forEach((f) => f()));
     };
   }, [refresh]);
 
   if (!usage) return null;
 
-  const metered =
-    usage.characterLimit > 0 && usage.characterLimit < PLAUSIBLE_LIMIT;
-  const pct = metered
-    ? Math.min(100, (usage.characterCount / usage.characterLimit) * 100)
-    : 0;
+  const share = Math.min(100, (usage.characters / usage.freeTier) * 100);
+  const over = Math.max(0, usage.characters - usage.freeTier);
+  const cost = (over / 1_000_000) * usage.usdPerMillion;
 
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-          {free ? "Free quota" : "Usage"}
+          This month
         </span>
         <span className="text-[11px] tabular-nums text-slate-400 dark:text-slate-500">
-          {metered ? `${Math.round(pct)}%` : fmt.format(usage.characterCount)}
+          {over > 0 ? money.format(cost) : `${Math.round(share)}%`}
         </span>
       </div>
 
-      {metered ? (
-        <>
-          <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-            <div
-              className={[
-                "h-full rounded-full transition-[width] duration-500",
-                pct > 90
-                  ? "bg-rose-500"
-                  : pct > 75
-                    ? "bg-amber-500"
-                    : "bg-iris-500",
-              ].join(" ")}
-              style={{ width: `${Math.max(pct, 1)}%` }}
-            />
-          </div>
-          <p className="mt-1 text-[10.5px] tabular-nums text-slate-400 dark:text-slate-500">
-            {fmt.format(usage.characterCount)} / {fmt.format(usage.characterLimit)}
-          </p>
-        </>
+      <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+        <div
+          className={[
+            "h-full rounded-full transition-[width] duration-500",
+            usage.quotaBlocked || over > 0
+              ? "bg-rose-500"
+              : share > 75
+                ? "bg-amber-500"
+                : "bg-iris-500",
+          ].join(" ")}
+          style={{ width: `${Math.max(share, 1)}%` }}
+        />
+      </div>
+
+      <p className="mt-1 text-[10.5px] tabular-nums text-slate-400 dark:text-slate-500">
+        {fmt.format(usage.characters)} / {fmt.format(usage.freeTier)} free
+        characters
+      </p>
+
+      {usage.quotaBlocked ? (
+        <p className="mt-0.5 text-[10px] font-medium leading-snug text-rose-600 dark:text-rose-400">
+          Google last refused this project for quota.
+        </p>
       ) : (
-        <p className="text-[10.5px] text-slate-400 dark:text-slate-500">
-          characters this period
+        <p className="mt-0.5 text-[10px] leading-snug text-slate-400 dark:text-slate-500">
+          {over > 0
+            ? `Past the free tier — about ${money.format(cost)} so far, at $${usage.usdPerMillion} per million.`
+            : "Lingo's own count — Google keeps the real one."}
         </p>
       )}
     </div>

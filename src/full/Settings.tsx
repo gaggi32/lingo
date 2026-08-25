@@ -16,13 +16,28 @@ import {
   KeyboardIcon,
   ResetIcon,
 } from "../components/icons";
-import { errorText, resumeShortcut, suspendShortcut, verifyKey } from "../lib/api";
+import {
+  clearApiKey,
+  errorText,
+  resumeShortcut,
+  setApiKey,
+  suspendShortcut,
+  verifyKey,
+} from "../lib/api";
 import { acceleratorToKeys, eventToChord } from "../lib/shortcut";
 import { nameOf } from "../lib/languages";
+import { useKeyStatus } from "../lib/useKeyStatus";
 import { useLanguages } from "../lib/useLanguages";
 import type { Settings } from "../lib/types";
 
-const DEEPL_SIGNUP = "https://www.deepl.com/pro-api";
+/** Where a key is made. */
+const CREDENTIALS = "https://console.cloud.google.com/apis/credentials";
+/** The API that has to be switched on before a key will translate anything. */
+const ENABLE_API =
+  "https://console.cloud.google.com/apis/library/translate.googleapis.com";
+/** What it costs once the free half-million characters are gone. */
+const PRICING = "https://cloud.google.com/translate/pricing";
+
 const DEFAULT_HOTKEY = "CommandOrControl+Shift+L";
 
 interface Props {
@@ -31,15 +46,13 @@ interface Props {
 }
 
 export default function SettingsPanel({ settings, save }: Props) {
-  const languages = useLanguages();
-
   return (
     <div className="tidy-scroll h-full overflow-y-auto">
       <div className="mx-auto max-w-2xl space-y-8 px-6 py-6">
-        <ApiKeySection settings={settings} save={save} />
-        <DefaultsSection settings={settings} save={save} languages={languages} />
+        <KeySection />
+        <TranslationSection settings={settings} save={save} />
         <PopupSection settings={settings} save={save} />
-        <SystemSection settings={settings} save={save} />
+        <SystemSection />
         <AboutSection />
       </div>
     </div>
@@ -98,6 +111,15 @@ function Row({
   );
 }
 
+/**
+ * A switch, drawn rather than borrowed from the platform.
+ *
+ * The knob is anchored with an explicit `left-0` and only ever moved by a
+ * transform. Leaving `left` unset would place it at its static position, which
+ * inside a `<button>` means the middle of the track — the browser's default
+ * `text-align: center` applies to the abspos origin too — so it would sit off
+ * its rail and slide the wrong distance.
+ */
 function Toggle({
   on,
   onChange,
@@ -115,48 +137,97 @@ function Toggle({
       aria-label={label}
       onClick={() => onChange(!on)}
       className={[
-        "relative h-[22px] w-[38px] rounded-full transition-colors",
+        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full",
+        "ring-1 ring-inset transition-colors duration-200",
+        "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-iris-500/40",
         on
-          ? "bg-iris-500"
-          : "bg-slate-300 hover:bg-slate-400 dark:bg-slate-600 dark:hover:bg-slate-500",
+          ? "bg-iris-500 ring-iris-600/20 hover:bg-iris-400 dark:bg-iris-500 dark:ring-black/20"
+          : "bg-slate-300 ring-slate-900/10 hover:bg-slate-400 dark:bg-slate-700 dark:ring-white/10 dark:hover:bg-slate-600",
       ].join(" ")}
     >
       <span
+        aria-hidden
         className={[
-          "absolute top-[3px] h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-          on ? "translate-x-[19px]" : "translate-x-[3px]",
+          "pointer-events-none absolute left-0 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full",
+          "bg-white shadow-md ring-1 ring-slate-900/10 transition-transform duration-200 ease-out",
+          on ? "translate-x-[22px]" : "translate-x-[2px]",
         ].join(" ")}
       />
     </button>
   );
 }
 
-// ---- API key ----------------------------------------------------------------
+function Link({ url, children }: { url: string; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={() => void openUrl(url)}
+      className="inline-flex items-center gap-1 text-[12.5px] font-medium text-iris-600 transition-colors hover:text-iris-700 dark:text-iris-300 dark:hover:text-iris-200"
+    >
+      {children}
+      <ExternalIcon className="text-[12px]" />
+    </button>
+  );
+}
 
-function ApiKeySection({ settings, save }: Props) {
-  const [draft, setDraft] = useState(settings.apiKey);
-  const [reveal, setReveal] = useState(false);
+// ---- The API key ------------------------------------------------------------
+
+/**
+ * The one thing Lingo cannot work without, so it comes first and says what to
+ * do rather than what is wrong.
+ *
+ * The key is write-only from here: Rust never sends it back, so a saved key is
+ * shown as its last four characters and can be replaced or removed but not
+ * read. That is deliberate — see the module docs in `settings.rs`.
+ */
+function KeySection() {
+  const status = useKeyStatus();
+  const [draft, setDraft] = useState("");
+  const [visible, setVisible] = useState(false);
   const [state, setState] = useState<"idle" | "checking" | "ok" | "bad">("idle");
   const [message, setMessage] = useState("");
 
-  // Adopt a key that arrived from somewhere else, but never clobber an edit
-  // in progress.
-  useEffect(() => {
-    setDraft((d) => (d === "" ? settings.apiKey : d));
-  }, [settings.apiKey]);
+  const saved = status?.present ?? false;
 
-  const dirty = draft.trim() !== settings.apiKey.trim();
-
-  const check = async () => {
+  const submit = async () => {
     setState("checking");
     setMessage("");
     try {
-      const usage = await verifyKey(draft);
-      await save({ ...settings, apiKey: draft.trim() });
+      await setApiKey(draft);
+      setDraft("");
+      setVisible(false);
+      const count = await verifyKey();
       setState("ok");
-      const free = draft.trim().endsWith(":fx");
       setMessage(
-        `Key works — ${free ? "Free" : "Pro"} plan, ${usage.characterCount.toLocaleString()} characters used.`,
+        `Google accepted it — ${count.toLocaleString()} languages available.`,
+      );
+    } catch (err) {
+      setState("bad");
+      setMessage(errorText(err));
+    }
+  };
+
+  const remove = async () => {
+    setDraft("");
+    setState("idle");
+    setMessage("");
+    try {
+      await clearApiKey();
+    } catch (err) {
+      setState("bad");
+      setMessage(errorText(err));
+    }
+  };
+
+  /** Re-check the key already saved, without retyping it. */
+  const recheck = async () => {
+    setState("checking");
+    setMessage("");
+    try {
+      const count = await verifyKey();
+      setState("ok");
+      setMessage(
+        `That key still works — ${count.toLocaleString()} languages available.`,
       );
     } catch (err) {
       setState("bad");
@@ -166,100 +237,144 @@ function ApiKeySection({ settings, save }: Props) {
 
   return (
     <Section
-      title="DeepL"
-      hint="Lingo talks to DeepL with your own API key. A free key covers 500,000 characters a month."
+      title="Google Cloud"
+      hint="Lingo translates through the Google Cloud Translation API. It needs a key
+            from a Google Cloud project with that API enabled and billing set up —
+            the first 500,000 characters each month are free."
     >
       <div className="px-4 py-3">
-        <label
-          htmlFor="deepl-key"
-          className="mb-1.5 block text-[13.5px] font-medium"
-        >
+        <label htmlFor="gc-key" className="mb-1.5 block text-[13.5px] font-medium">
           API key
         </label>
+
+        {saved ? (
+          <p className="mb-2 flex flex-wrap items-center gap-1.5 text-[12.5px] leading-snug text-slate-500 dark:text-slate-400">
+            <CheckIcon
+              className="text-[13px] text-emerald-600 dark:text-emerald-400"
+              strokeWidth={2.5}
+            />
+            A key ending
+            <code className="rounded bg-slate-100 px-1 py-px font-mono text-[11.5px] dark:bg-white/5">
+              {status?.hint}
+            </code>
+            is saved. Paste a new one below to replace it.
+          </p>
+        ) : (
+          <p className="mb-2 text-[12.5px] leading-snug text-slate-500 dark:text-slate-400">
+            Create one under <em>APIs &amp; Services → Credentials</em>, then
+            enable the Cloud Translation API on the same project.
+          </p>
+        )}
+
         <div className="flex gap-2">
           <div className="relative flex-1">
-            <KeyIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[14px] text-slate-400" />
             <input
-              id="deepl-key"
-              type={reveal ? "text" : "password"}
+              id="gc-key"
+              type={visible ? "text" : "password"}
               value={draft}
               onChange={(e) => {
                 setDraft(e.target.value);
                 setState("idle");
                 setMessage("");
               }}
-              placeholder="00000000-0000-0000-0000-000000000000:fx"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && draft.trim()) void submit();
+              }}
+              placeholder={saved ? "Paste a replacement key" : "AIza…"}
               spellCheck={false}
               autoComplete="off"
-              className="field pl-9 pr-9 font-mono text-[12.5px]"
+              className="field w-full pr-9 font-mono text-[12.5px]"
             />
             <button
               type="button"
-              onClick={() => setReveal((r) => !r)}
-              title={reveal ? "Hide the key" : "Show the key"}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 transition-colors hover:text-slate-700 dark:hover:text-slate-200"
+              onClick={() => setVisible((v) => !v)}
+              title={visible ? "Hide the key" : "Show what you pasted"}
+              aria-label={visible ? "Hide the key" : "Show the key"}
+              className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-slate-400 transition-colors hover:text-slate-700 dark:hover:text-slate-200"
             >
-              {reveal ? (
-                <EyeOffIcon className="text-[14px]" />
+              {visible ? (
+                <EyeOffIcon className="text-[15px]" />
               ) : (
-                <EyeIcon className="text-[14px]" />
+                <EyeIcon className="text-[15px]" />
               )}
             </button>
           </div>
 
           <button
             type="button"
-            onClick={() => void check()}
-            disabled={!draft.trim() || state === "checking"}
+            onClick={() => void (draft.trim() ? submit() : recheck())}
+            disabled={state === "checking" || (!draft.trim() && !saved)}
             className="accent accent-hover shrink-0 rounded-lg px-3.5 text-[13px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {state === "checking" ? "Checking…" : dirty ? "Save & verify" : "Verify"}
+            {state === "checking"
+              ? "Checking…"
+              : draft.trim()
+                ? "Save & check"
+                : "Check"}
           </button>
         </div>
 
         {message && (
           <p
             className={[
-              "mt-2 flex items-start gap-1.5 text-[12.5px]",
+              "mt-2 flex items-start gap-1.5 text-[12.5px] leading-snug",
               state === "ok"
                 ? "text-emerald-600 dark:text-emerald-400"
                 : "text-rose-600 dark:text-rose-400",
             ].join(" ")}
           >
             {state === "ok" ? (
-              <CheckIcon className="mt-[2px] shrink-0 text-[13px]" strokeWidth={2.5} />
+              <CheckIcon
+                className="mt-[2px] shrink-0 text-[13px]"
+                strokeWidth={2.5}
+              />
             ) : (
               <AlertIcon className="mt-[2px] shrink-0 text-[13px]" />
             )}
-            {message}
+            <span>{message}</span>
           </p>
         )}
 
-        <button
-          type="button"
-          onClick={() => void openUrl(DEEPL_SIGNUP)}
-          className="mt-2.5 inline-flex items-center gap-1 text-[12.5px] font-medium text-iris-600 transition-colors hover:text-iris-700 dark:text-iris-300 dark:hover:text-iris-200"
-        >
-          Get a key from DeepL
-          <ExternalIcon className="text-[12px]" />
-        </button>
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <Link url={CREDENTIALS}>Create a key</Link>
+          <Link url={ENABLE_API}>Enable the API</Link>
+          <Link url={PRICING}>What it costs</Link>
+
+          {saved && (
+            <button
+              type="button"
+              onClick={() => void remove()}
+              className="text-[12.5px] font-medium text-slate-500 transition-colors hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+            >
+              Remove it
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-start gap-2.5 px-4 py-3 text-[12.5px] leading-snug text-slate-500 dark:text-slate-400">
+        <KeyIcon className="mt-[2px] shrink-0 text-[14px]" />
+        <p>
+          Lingo keeps the key in its own config folder in plain text, and never
+          hands it to the part of the app that draws the screen. It is still a
+          billable credential: restrict it to the Cloud Translation API in the
+          Cloud console, and set a quota, so a key that does get out cannot be
+          spent on anything else.
+        </p>
       </div>
     </Section>
   );
 }
 
-// ---- Default language pair --------------------------------------------------
+// ---- Translation ------------------------------------------------------------
 
-function DefaultsSection({
-  settings,
-  save,
-  languages,
-}: Props & { languages: ReturnType<typeof useLanguages> }) {
+function TranslationSection({ settings, save }: Props) {
   const [picker, setPicker] = useState<"source" | "target" | null>(null);
+  const languages = useLanguages();
 
   return (
     <Section
-      title="Languages"
+      title="Translation"
       hint="What the pop-up starts with each time it opens."
     >
       <Row label="Translate from">
@@ -267,7 +382,7 @@ function DefaultsSection({
           <LangButton
             label={
               settings.sourceLang
-                ? nameOf(languages.source, settings.sourceLang)
+                ? nameOf(languages, settings.sourceLang)
                 : "Detect language"
             }
             code={settings.sourceLang || "auto"}
@@ -277,7 +392,7 @@ function DefaultsSection({
           {picker === "source" && (
             <LangPopover align="right" onClose={() => setPicker(null)}>
               <LangList
-                languages={languages.source}
+                languages={languages}
                 value={settings.sourceLang}
                 allowAuto
                 rows={7}
@@ -294,7 +409,7 @@ function DefaultsSection({
       <Row label="Translate into">
         <div className="relative">
           <LangButton
-            label={nameOf(languages.target, settings.targetLang)}
+            label={nameOf(languages, settings.targetLang)}
             code={settings.targetLang}
             open={picker === "target"}
             onToggle={() => setPicker((p) => (p === "target" ? null : "target"))}
@@ -302,7 +417,7 @@ function DefaultsSection({
           {picker === "target" && (
             <LangPopover align="right" onClose={() => setPicker(null)}>
               <LangList
-                languages={languages.target}
+                languages={languages}
                 value={settings.targetLang}
                 rows={7}
                 onPick={(code) => {
@@ -332,7 +447,7 @@ function PopupSection({ settings, save }: Props) {
 
       <Row
         label="Start from the clipboard"
-        description="Opens with whatever you last copied, already translated."
+        description="Opens with whatever you last copied, already translated. Long clippings are ignored rather than being billed for uninvited."
       >
         <Toggle
           label="Start from the clipboard"
@@ -343,7 +458,7 @@ function PopupSection({ settings, save }: Props) {
 
       <Row
         label="Translate as you type"
-        description="Off means nothing is sent to DeepL until you press Enter."
+        description="Off means nothing is sent to Google — and nothing is billed — until you press Enter."
       >
         <Toggle
           label="Translate as you type"
@@ -491,7 +606,8 @@ function HotkeyRecorder({ settings, save }: Props) {
 
 // ---- System -----------------------------------------------------------------
 
-function SystemSection({ settings, save }: Props) {
+// Nothing here is a Lingo setting — autostart lives with the OS.
+function SystemSection() {
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [error, setError] = useState("");
 
@@ -536,26 +652,6 @@ function SystemSection({ settings, save }: Props) {
           {error}
         </p>
       )}
-
-      <Row
-        label="Formality"
-        description="Applied to the languages DeepL supports it for — German, French, Spanish, Italian, Dutch, Polish, Portuguese, Japanese and Russian."
-      >
-        <select
-          value={settings.formality}
-          onChange={(e) =>
-            void save({
-              ...settings,
-              formality: e.target.value as Settings["formality"],
-            })
-          }
-          className="field w-auto py-1.5 text-[12.5px]"
-        >
-          <option value="prefer_less">Casual</option>
-          <option value="default">Neutral</option>
-          <option value="prefer_more">Formal</option>
-        </select>
-      </Row>
     </Section>
   );
 }
@@ -569,16 +665,23 @@ function AboutSection() {
         About
       </h2>
       <div className="mt-3 space-y-2 text-[12.5px] leading-relaxed text-slate-500 dark:text-slate-400">
-        <p>Lingo {__APP_VERSION__} — a pop-up translator built on DeepL.</p>
         <p>
-          Your API key and preferences live in a plain <code>settings.json</code>{" "}
-          in Lingo's own config folder, and the history is a local SQLite file
-          beside it. Neither is encrypted: anything running as your user account
-          can read them, the same as the key itself.
+          Lingo {__APP_VERSION__} — a pop-up translator built on the Google Cloud
+          Translation API.
+        </p>
+        <p>
+          Your preferences and your API key live in a plain{" "}
+          <code>settings.json</code> in Lingo&apos;s own config folder, the
+          month&apos;s usage tally sits beside it, and the history is a local
+          SQLite file in the data folder. None of them is encrypted: anything
+          running as your user account can read them.
         </p>
         <p>
           Nothing is sent anywhere except the text you translate, which goes to
-          DeepL and nowhere else.
+          Google and nowhere else. Google states that Cloud Translation does not
+          use your content to train its models — which is the main way it
+          differs from the free consumer endpoint — but it is still someone
+          else&apos;s server, so treat it accordingly.
         </p>
       </div>
     </section>

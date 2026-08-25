@@ -1,43 +1,53 @@
 import { useEffect, useState } from "react";
-import { fetchLanguages } from "./api";
-import { cacheLanguages, cachedLanguages } from "./languages";
-import { onSettingsChanged } from "./events";
-import type { Languages } from "./types";
+import { listLanguages } from "./api";
+import { onKeyChanged } from "./events";
+import { FALLBACK_LANGUAGES } from "./languages";
+import type { Language } from "./types";
 
 /**
- * DeepL's language lists, refreshed in the background.
+ * Google's own list of what it will translate, with the bundled table standing
+ * in until it arrives.
  *
- * Starts from the cached copy (or the built-in fallback) so the pickers are
- * never empty, then replaces it with whatever the account actually supports.
- * A failure here is not worth surfacing: without a key there is nothing to
- * fetch, and the cached lists are correct often enough to keep working from.
+ * The fetch is free — Google does not bill the languages endpoint — but it is
+ * still a round trip, and both windows want the same answer, so the result is
+ * cached for the lifetime of the webview and shared by every caller. Saving or
+ * removing a key throws the cache away, because a different key may be a
+ * different project with a different answer, and because the first key is what
+ * turns the fetch from impossible into possible.
+ *
+ * A failure is not surfaced. There is nothing the user can do about it from a
+ * language picker, the bundled list is a perfectly good answer, and the place
+ * that *can* say something useful about a broken key — Settings — already does.
  */
-export function useLanguages(): Languages {
-  const [langs, setLangs] = useState<Languages>(cachedLanguages);
+
+let cache: Promise<Language[]> | null = null;
+
+function load(): Promise<Language[]> {
+  cache ??= listLanguages().catch(() => FALLBACK_LANGUAGES);
+  return cache;
+}
+
+export function useLanguages(): Language[] {
+  const [languages, setLanguages] = useState<Language[]>(FALLBACK_LANGUAGES);
 
   useEffect(() => {
-    let alive = true;
+    let live = true;
+    void load().then((list) => {
+      if (live && list.length > 0) setLanguages(list);
+    });
 
-    const refresh = () => {
-      fetchLanguages()
-        .then((next) => {
-          if (!alive || !next.source.length || !next.target.length) return;
-          setLangs(next);
-          cacheLanguages(next);
-        })
-        .catch(() => {
-          /* No key yet, or offline — the cached lists stand. */
-        });
-    };
+    const un = onKeyChanged(() => {
+      cache = null;
+      void load().then((list) => {
+        if (live && list.length > 0) setLanguages(list);
+      });
+    });
 
-    refresh();
-    // A key added in Settings makes the real lists reachable for the first time.
-    const un = onSettingsChanged(refresh);
     return () => {
-      alive = false;
+      live = false;
       un.then((f) => f());
     };
   }, []);
 
-  return langs;
+  return languages;
 }

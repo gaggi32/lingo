@@ -4,10 +4,14 @@
  *     node scripts/make-icon.mjs
  *     npx tauri icon app-icon.png     # fans it out into src-tauri/icons/
  *
- * The mark is the universal translate pairing — a Latin "A" beside the
- * character 文 — on the iris tile the rest of the UI takes its accent from.
- * Both glyphs are built from capsules rather than a font so the icon renders
- * identically on any machine with nothing installed but Node.
+ * The mark is two speech bubbles on a dark teal tile: one drawn as an outline
+ * with its tail down-left, one filled and overlapping it with its tail
+ * down-right. What was said, and what came back — which is the whole app.
+ *
+ * Every shape is an axis-aligned rounded box with per-corner radii, so the
+ * sharp corner that makes each bubble a bubble is just one radius set small.
+ * That means the icon renders identically on any machine with nothing
+ * installed but Node.
  *
  * Everything is drawn with signed distance fields at one sample per pixel:
  * a shape's distance in pixels converts straight into coverage, which gives
@@ -22,53 +26,127 @@ import { dirname, resolve } from "node:path";
 const SIZE = 1024;
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "app-icon.png");
 
-// ---- Geometry, in a 0..1 unit square ---------------------------------------
+// ---- Geometry ---------------------------------------------------------------
+//
+// Laid out on the 224-pixel grid the design was drawn on, then normalised into
+// the 0..1 unit square the distance fields work in. Boxes are given the way CSS
+// gives them — top-left corner, width, height, and the four radii clockwise
+// from the top left.
 
-/** iOS/macOS-style corner radius. */
-const CORNER = 0.225;
-const STROKE = 0.052;
+const GRID = 224;
+const u = (px) => px / GRID;
 
-/** "A": two legs and a crossbar. */
-const LETTER_A = [
-  [0.305, 0.185, 0.145, 0.505],
-  [0.305, 0.185, 0.465, 0.505],
-  [0.208, 0.398, 0.402, 0.398],
-];
+/** The tile itself, plus the hairline that lifts its edge off the background. */
+const TILE = {
+  x: 0,
+  y: 0,
+  w: 224,
+  h: 224,
+  r: { tl: 52, tr: 52, br: 52, bl: 52 },
+};
+const TILE_EDGE = 1;
 
-/** 文: the top dot, the horizontal, then the crossing pair of diagonals. */
-const GLYPH_WEN = [
-  [0.706, 0.452, 0.686, 0.512],
-  [0.542, 0.552, 0.858, 0.552],
-  [0.778, 0.592, 0.562, 0.842],
-  [0.622, 0.592, 0.858, 0.842],
-];
+/** Said: an outline, tail down-left. */
+const ASKED = {
+  x: 42,
+  y: 42,
+  w: 104,
+  h: 88,
+  r: { tl: 26, tr: 26, br: 26, bl: 6 },
+  stroke: 12,
+};
 
-const STROKES = [...LETTER_A, ...GLYPH_WEN];
+/** Answered: filled, tail down-right, riding over the first. */
+const ANSWERED = {
+  x: 80,
+  y: 106,
+  w: 104,
+  h: 88,
+  r: { tl: 26, tr: 26, br: 6, bl: 26 },
+};
 
 // ---- Palette ----------------------------------------------------------------
+//
+// Authored in OKLCH, because the two teals have to hold the same apparent
+// lightness as each other and sRGB hex will not promise that. Converted here
+// rather than pasted as hex so the numbers stay the ones that were designed.
 
-const TOP_LEFT = [0x8b, 0x6b, 0xff];
-const BOTTOM_RIGHT = [0x51, 0x1f, 0xb8];
-const INK = [0xff, 0xff, 0xff];
+/** OKLCH -> sRGB bytes, gamut-clipped per channel. */
+function oklch(L, C, H) {
+  const hr = (H * Math.PI) / 180;
+  const a = C * Math.cos(hr);
+  const b = C * Math.sin(hr);
+
+  // OKLab -> LMS -> linear sRGB (Björn Ottosson's matrices).
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+
+  const linear = [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+
+  return linear.map((c) => {
+    const clamped = Math.min(1, Math.max(0, c));
+    const encoded =
+      clamped <= 0.0031308
+        ? 12.92 * clamped
+        : 1.055 * clamped ** (1 / 2.4) - 0.055;
+    return Math.round(encoded * 255);
+  });
+}
+
+const BACKDROP = oklch(0.24, 0.028, 208);
+const EDGE = oklch(0.3, 0.028, 208);
+const OUTLINE = oklch(0.97, 0.01, 200);
+const FILL = oklch(0.62, 0.13, 188);
 
 // ---- Signed distance fields -------------------------------------------------
 
-function roundedRect(x, y, half, radius) {
-  const dx = Math.abs(x) - (half - radius);
-  const dy = Math.abs(y) - (half - radius);
-  const ox = Math.max(dx, 0);
-  const oy = Math.max(dy, 0);
-  return Math.hypot(ox, oy) + Math.min(Math.max(dx, dy), 0) - radius;
+/**
+ * A rounded box with four independent corner radii.
+ *
+ * The radius is picked per quadrant before the usual rounded-box distance, so
+ * one sharp corner costs nothing but a different number.
+ */
+function roundedBox(px, py, cx, cy, halfW, halfH, r) {
+  const dx = px - cx;
+  const dy = py - cy;
+  // y grows downward here, so a positive dy is the bottom half.
+  const radius = dx >= 0 ? (dy >= 0 ? r.br : r.tr) : dy >= 0 ? r.bl : r.tl;
+  const qx = Math.abs(dx) - halfW + radius;
+  const qy = Math.abs(dy) - halfH + radius;
+  return (
+    Math.min(Math.max(qx, qy), 0) +
+    Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) -
+    radius
+  );
 }
 
-function capsule(px, py, ax, ay, bx, by, r) {
-  const vx = bx - ax;
-  const vy = by - ay;
-  const wx = px - ax;
-  const wy = py - ay;
-  const len2 = vx * vx + vy * vy;
-  const t = len2 === 0 ? 0 : Math.min(1, Math.max(0, (wx * vx + wy * vy) / len2));
-  return Math.hypot(wx - vx * t, wy - vy * t) - r;
+/**
+ * Distance to a CSS-style box, optionally shrunk by `inset` on every side.
+ *
+ * The inset is how a border is drawn: the same box pulled in by the border
+ * width, with each radius reduced to match, exactly as CSS resolves an inner
+ * radius. A corner whose radius is smaller than the border simply squares off.
+ */
+function boxSdf(h, v, box, inset = 0) {
+  return roundedBox(
+    h,
+    v,
+    u(box.x + box.w / 2),
+    u(box.y + box.h / 2),
+    u(box.w / 2 - inset),
+    u(box.h / 2 - inset),
+    {
+      tl: u(Math.max(0, box.r.tl - inset)),
+      tr: u(Math.max(0, box.r.tr - inset)),
+      br: u(Math.max(0, box.r.br - inset)),
+      bl: u(Math.max(0, box.r.bl - inset)),
+    },
+  );
 }
 
 /** Distance in pixels -> coverage, clamped. */
@@ -77,9 +155,16 @@ function coverage(distanceInUnits) {
   return Math.min(1, Math.max(0, 0.5 - px));
 }
 
+/** Paint `ink` over `dst` at the given coverage, in place. */
+function over(dst, ink, alpha) {
+  if (alpha <= 0) return;
+  for (let c = 0; c < 3; c++) dst[c] += (ink[c] - dst[c]) * alpha;
+}
+
 // ---- Render -----------------------------------------------------------------
 
 const raw = Buffer.alloc(SIZE * (SIZE * 4 + 1));
+const px = [0, 0, 0];
 
 for (let y = 0; y < SIZE; y++) {
   const rowStart = y * (SIZE * 4 + 1);
@@ -88,29 +173,37 @@ for (let y = 0; y < SIZE; y++) {
   const v = (y + 0.5) / SIZE;
 
   for (let x = 0; x < SIZE; x++) {
-    const u = (x + 0.5) / SIZE;
+    const h = (x + 0.5) / SIZE;
 
-    const tileAlpha = coverage(roundedRect(u - 0.5, v - 0.5, 0.5, CORNER));
-
-    // Diagonal gradient, with a soft highlight lifting the top-left corner.
-    const t = Math.min(1, Math.max(0, (u + v) / 2));
-    const highlight = 0.16 * Math.max(0, 1 - Math.hypot(u - 0.24, v - 0.2) * 1.7);
-
-    let markAlpha = 0;
-    for (const [ax, ay, bx, by] of STROKES) {
-      markAlpha = Math.max(
-        markAlpha,
-        coverage(capsule(u, v, ax, ay, bx, by, STROKE / 2)),
-      );
-      if (markAlpha >= 1) break;
+    const tileAlpha = coverage(boxSdf(h, v, TILE));
+    if (tileAlpha <= 0) {
+      raw[rowStart + 1 + x * 4 + 3] = 0;
+      continue;
     }
+
+    px[0] = BACKDROP[0];
+    px[1] = BACKDROP[1];
+    px[2] = BACKDROP[2];
+
+    // The hairline edge: inside the tile, outside the tile pulled in by 1.
+    over(px, EDGE, 1 - coverage(boxSdf(h, v, TILE, TILE_EDGE)));
+
+    // The outlined bubble is the ring between its box and that box inset by
+    // the border width.
+    over(
+      px,
+      OUTLINE,
+      coverage(boxSdf(h, v, ASKED)) *
+        (1 - coverage(boxSdf(h, v, ASKED, ASKED.stroke))),
+    );
+
+    // The filled one paints last, so it reads as the nearer of the two.
+    over(px, FILL, coverage(boxSdf(h, v, ANSWERED)));
 
     const i = rowStart + 1 + x * 4;
-    for (let c = 0; c < 3; c++) {
-      const base = TOP_LEFT[c] + (BOTTOM_RIGHT[c] - TOP_LEFT[c]) * t;
-      const lit = Math.min(255, base + highlight * 255);
-      raw[i + c] = Math.round(lit + (INK[c] - lit) * markAlpha);
-    }
+    raw[i] = Math.round(px[0]);
+    raw[i + 1] = Math.round(px[1]);
+    raw[i + 2] = Math.round(px[2]);
     raw[i + 3] = Math.round(tileAlpha * 255);
   }
 }
@@ -162,3 +255,7 @@ writeFileSync(
 );
 
 console.log(`Wrote ${OUT} (${SIZE}x${SIZE})`);
+console.log(
+  `  backdrop rgb(${BACKDROP})  edge rgb(${EDGE})\n` +
+    `  outline  rgb(${OUTLINE})  fill rgb(${FILL})`,
+);

@@ -15,6 +15,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Lingo",
         "url": "index.html",
         "width": 980,
@@ -27,6 +28,7 @@
       },
       {
         "label": "pop",
+        "create": false,
         "title": "Lingo",
         "url": "pop.html",
         "width": 560,
@@ -49,8 +51,8 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
-    "shortDescription": "Pop-up translator powered by DeepL",
-    "longDescription": "Lingo puts DeepL one keystroke away: hit the hotkey, a small card appears with whatever is on your clipboard already translated, and it disappears the moment you click away.",
+    "shortDescription": "Pop-up translator powered by Google Cloud Translation",
+    "longDescription": "Lingo puts a translator one keystroke away: hit the hotkey, a small card appears with whatever is on your clipboard already translated, and it disappears the moment you click away. It translates through the Google Cloud Translation API using your own key, so the text goes to your project and nowhere else.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

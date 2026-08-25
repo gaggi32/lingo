@@ -1,173 +1,191 @@
-import type { Language, Languages } from "./types";
+import type { Language } from "./types";
 
 /**
- * A built-in copy of DeepL's language lists.
+ * The language table.
  *
- * The real lists are fetched from `/v2/languages` as soon as a key is
- * configured — DeepL adds languages, and hard-coding them would go stale. This
- * is what the pickers show before that: on first launch, offline, or while the
- * fetch is still in flight.
+ * Google publishes its own list and it changes — languages get added between
+ * releases — so Lingo asks for it with the saved key rather than guessing. See
+ * `useLanguages.ts`. The list below is what the pickers show until that answer
+ * arrives, and what they keep showing when there is no key yet or no
+ * connection: a picker that is empty because a fetch failed would be a worse
+ * bug than a list that is a few months out of date.
+ *
+ * Codes are Google's own spelling. Unlike DeepL, Google draws no distinction
+ * between what it can read and what it can write, so one table serves both
+ * pickers and a swap is just an exchange of two codes.
  */
+export const FALLBACK_LANGUAGES: Language[] = [
+  { code: "af", name: "Afrikaans" },
+  { code: "sq", name: "Albanian" },
+  { code: "am", name: "Amharic" },
+  { code: "ar", name: "Arabic" },
+  { code: "hy", name: "Armenian" },
+  { code: "as", name: "Assamese" },
+  { code: "ay", name: "Aymara" },
+  { code: "az", name: "Azerbaijani" },
+  { code: "bm", name: "Bambara" },
+  { code: "eu", name: "Basque" },
+  { code: "be", name: "Belarusian" },
+  { code: "bn", name: "Bengali" },
+  { code: "bho", name: "Bhojpuri" },
+  { code: "bs", name: "Bosnian" },
+  { code: "bg", name: "Bulgarian" },
+  { code: "ca", name: "Catalan" },
+  { code: "ceb", name: "Cebuano" },
+  { code: "zh-CN", name: "Chinese (Simplified)" },
+  { code: "zh-TW", name: "Chinese (Traditional)" },
+  { code: "co", name: "Corsican" },
+  { code: "hr", name: "Croatian" },
+  { code: "cs", name: "Czech" },
+  { code: "da", name: "Danish" },
+  { code: "dv", name: "Dhivehi" },
+  { code: "doi", name: "Dogri" },
+  { code: "nl", name: "Dutch" },
+  { code: "en", name: "English" },
+  { code: "eo", name: "Esperanto" },
+  { code: "et", name: "Estonian" },
+  { code: "ee", name: "Ewe" },
+  { code: "tl", name: "Filipino (Tagalog)" },
+  { code: "fi", name: "Finnish" },
+  { code: "fr", name: "French" },
+  { code: "fy", name: "Frisian" },
+  { code: "gl", name: "Galician" },
+  { code: "ka", name: "Georgian" },
+  { code: "de", name: "German" },
+  { code: "el", name: "Greek" },
+  { code: "gn", name: "Guarani" },
+  { code: "gu", name: "Gujarati" },
+  { code: "ht", name: "Haitian Creole" },
+  { code: "ha", name: "Hausa" },
+  { code: "haw", name: "Hawaiian" },
+  { code: "he", name: "Hebrew" },
+  { code: "hi", name: "Hindi" },
+  { code: "hmn", name: "Hmong" },
+  { code: "hu", name: "Hungarian" },
+  { code: "is", name: "Icelandic" },
+  { code: "ig", name: "Igbo" },
+  { code: "ilo", name: "Ilocano" },
+  { code: "id", name: "Indonesian" },
+  { code: "ga", name: "Irish" },
+  { code: "it", name: "Italian" },
+  { code: "ja", name: "Japanese" },
+  { code: "jv", name: "Javanese" },
+  { code: "kn", name: "Kannada" },
+  { code: "kk", name: "Kazakh" },
+  { code: "km", name: "Khmer" },
+  { code: "rw", name: "Kinyarwanda" },
+  { code: "gom", name: "Konkani" },
+  { code: "ko", name: "Korean" },
+  { code: "kri", name: "Krio" },
+  { code: "ku", name: "Kurdish" },
+  { code: "ckb", name: "Kurdish (Sorani)" },
+  { code: "ky", name: "Kyrgyz" },
+  { code: "lo", name: "Lao" },
+  { code: "la", name: "Latin" },
+  { code: "lv", name: "Latvian" },
+  { code: "ln", name: "Lingala" },
+  { code: "lt", name: "Lithuanian" },
+  { code: "lg", name: "Luganda" },
+  { code: "lb", name: "Luxembourgish" },
+  { code: "mk", name: "Macedonian" },
+  { code: "mai", name: "Maithili" },
+  { code: "mg", name: "Malagasy" },
+  { code: "ms", name: "Malay" },
+  { code: "ml", name: "Malayalam" },
+  { code: "mt", name: "Maltese" },
+  { code: "mi", name: "Maori" },
+  { code: "mr", name: "Marathi" },
+  { code: "mni-Mtei", name: "Meiteilon (Manipuri)" },
+  { code: "lus", name: "Mizo" },
+  { code: "mn", name: "Mongolian" },
+  { code: "my", name: "Myanmar (Burmese)" },
+  { code: "ne", name: "Nepali" },
+  { code: "no", name: "Norwegian" },
+  { code: "ny", name: "Nyanja (Chichewa)" },
+  { code: "or", name: "Odia (Oriya)" },
+  { code: "om", name: "Oromo" },
+  { code: "ps", name: "Pashto" },
+  { code: "fa", name: "Persian" },
+  { code: "pl", name: "Polish" },
+  { code: "pt", name: "Portuguese" },
+  { code: "pa", name: "Punjabi" },
+  { code: "qu", name: "Quechua" },
+  { code: "ro", name: "Romanian" },
+  { code: "ru", name: "Russian" },
+  { code: "sm", name: "Samoan" },
+  { code: "sa", name: "Sanskrit" },
+  { code: "gd", name: "Scots Gaelic" },
+  { code: "nso", name: "Sepedi" },
+  { code: "sr", name: "Serbian" },
+  { code: "st", name: "Sesotho" },
+  { code: "sn", name: "Shona" },
+  { code: "sd", name: "Sindhi" },
+  { code: "si", name: "Sinhala" },
+  { code: "sk", name: "Slovak" },
+  { code: "sl", name: "Slovenian" },
+  { code: "so", name: "Somali" },
+  { code: "es", name: "Spanish" },
+  { code: "su", name: "Sundanese" },
+  { code: "sw", name: "Swahili" },
+  { code: "sv", name: "Swedish" },
+  { code: "tg", name: "Tajik" },
+  { code: "ta", name: "Tamil" },
+  { code: "tt", name: "Tatar" },
+  { code: "te", name: "Telugu" },
+  { code: "th", name: "Thai" },
+  { code: "ti", name: "Tigrinya" },
+  { code: "ts", name: "Tsonga" },
+  { code: "tr", name: "Turkish" },
+  { code: "tk", name: "Turkmen" },
+  { code: "ak", name: "Twi (Akan)" },
+  { code: "uk", name: "Ukrainian" },
+  { code: "ur", name: "Urdu" },
+  { code: "ug", name: "Uyghur" },
+  { code: "uz", name: "Uzbek" },
+  { code: "vi", name: "Vietnamese" },
+  { code: "cy", name: "Welsh" },
+  { code: "xh", name: "Xhosa" },
+  { code: "yi", name: "Yiddish" },
+  { code: "yo", name: "Yoruba" },
+  { code: "zu", name: "Zulu" },
+];
 
-const formal = (code: string) =>
-  ["DE", "FR", "IT", "ES", "NL", "PL", "PT-BR", "PT-PT", "JA", "RU"].includes(
-    code,
-  );
-
-function make(pairs: [string, string][]): Language[] {
-  return pairs.map(([language, name]) => ({
-    language,
-    name,
-    supportsFormality: formal(language),
-  }));
-}
-
-export const FALLBACK_TARGETS = make([
-  ["AR", "Arabic"],
-  ["BG", "Bulgarian"],
-  ["CS", "Czech"],
-  ["DA", "Danish"],
-  ["DE", "German"],
-  ["EL", "Greek"],
-  ["EN-GB", "English (British)"],
-  ["EN-US", "English (American)"],
-  ["ES", "Spanish"],
-  ["ET", "Estonian"],
-  ["FI", "Finnish"],
-  ["FR", "French"],
-  ["HE", "Hebrew"],
-  ["HU", "Hungarian"],
-  ["ID", "Indonesian"],
-  ["IT", "Italian"],
-  ["JA", "Japanese"],
-  ["KO", "Korean"],
-  ["LT", "Lithuanian"],
-  ["LV", "Latvian"],
-  ["NB", "Norwegian Bokmal"],
-  ["NL", "Dutch"],
-  ["PL", "Polish"],
-  ["PT-BR", "Portuguese (Brazilian)"],
-  ["PT-PT", "Portuguese (European)"],
-  ["RO", "Romanian"],
-  ["RU", "Russian"],
-  ["SK", "Slovak"],
-  ["SL", "Slovenian"],
-  ["SV", "Swedish"],
-  ["TH", "Thai"],
-  ["TR", "Turkish"],
-  ["UK", "Ukrainian"],
-  ["VI", "Vietnamese"],
-  ["ZH", "Chinese"],
-]);
-
-export const FALLBACK_SOURCES = make([
-  ["AR", "Arabic"],
-  ["BG", "Bulgarian"],
-  ["CS", "Czech"],
-  ["DA", "Danish"],
-  ["DE", "German"],
-  ["EL", "Greek"],
-  ["EN", "English"],
-  ["ES", "Spanish"],
-  ["ET", "Estonian"],
-  ["FI", "Finnish"],
-  ["FR", "French"],
-  ["HE", "Hebrew"],
-  ["HU", "Hungarian"],
-  ["ID", "Indonesian"],
-  ["IT", "Italian"],
-  ["JA", "Japanese"],
-  ["KO", "Korean"],
-  ["LT", "Lithuanian"],
-  ["LV", "Latvian"],
-  ["NB", "Norwegian Bokmal"],
-  ["NL", "Dutch"],
-  ["PL", "Polish"],
-  ["PT", "Portuguese"],
-  ["RO", "Romanian"],
-  ["RU", "Russian"],
-  ["SK", "Slovak"],
-  ["SL", "Slovenian"],
-  ["SV", "Swedish"],
-  ["TH", "Thai"],
-  ["TR", "Turkish"],
-  ["UK", "Ukrainian"],
-  ["VI", "Vietnamese"],
-  ["ZH", "Chinese"],
-]);
-
-export const FALLBACK: Languages = {
-  source: FALLBACK_SOURCES,
-  target: FALLBACK_TARGETS,
-};
-
-/** The sentinel the pickers use for "let DeepL work it out". */
+/** The sentinel the pickers use for "let Google work it out". */
 export const AUTO = "";
 
-const CACHE_KEY = "lingo.languages";
-
 /**
- * Language lists change perhaps twice a year, so the fetched copy is cached in
- * localStorage and used to seed the next launch — the pickers are populated
- * before the network call returns instead of flashing the fallback.
+ * Human-readable name for a code, falling back to the code itself.
+ *
+ * The list is passed in rather than reached for, because which list is in play
+ * depends on whether Google has answered yet — and a name rendered from the
+ * bundled table while the live one is loading should not disagree with itself
+ * a moment later.
  */
-export function cachedLanguages(): Languages {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return FALLBACK;
-    const parsed = JSON.parse(raw) as Languages;
-    if (!parsed.source?.length || !parsed.target?.length) return FALLBACK;
-    return parsed;
-  } catch {
-    return FALLBACK;
-  }
-}
-
-export function cacheLanguages(langs: Languages): void {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(langs));
-  } catch {
-    // A full or disabled localStorage costs us the cache, nothing more.
-  }
-}
-
-/** Human-readable name for a code, falling back to the code itself. */
-export function nameOf(list: Language[], code: string): string {
+export function nameOf(languages: Language[], code: string): string {
   if (!code) return "Detect";
-  const hit = list.find((l) => l.language === code);
+  const hit = languages.find((l) => l.code === code);
   if (hit) return hit.name;
-  // A detected source ("EN") may not be in the target list ("EN-GB"/"EN-US"),
-  // so try again on the base language before giving up.
-  const base = code.split("-")[0];
-  return list.find((l) => l.language.split("-")[0] === base)?.name ?? code;
+  // Google detects Chinese as "zh-CN" but can report a bare "zh", which names
+  // no row on its own, so try the base language before giving up.
+  const base = code.split("-")[0].toLowerCase();
+  return languages.find((l) => l.code.split("-")[0] === base)?.name ?? code;
 }
 
-/** Compact badge text: "EN-GB" stays, "Detect" becomes "auto". */
+/** Compact badge text: a code stays as it is, "Detect" becomes "auto". */
 export function codeOf(code: string): string {
   return code || "auto";
 }
 
 /**
- * The source code to use after a swap. Target codes carry a region ("EN-GB")
- * that the source list does not accept, so it is dropped.
+ * The list entry a bare code refers to.
+ *
+ * A detected language has to be landed on a real row before it can be used as a
+ * target or highlighted in a picker — otherwise swapping into a detected "zh"
+ * would ask Google to translate into a language it does not list.
  */
-export function toSourceCode(targetCode: string): string {
-  return targetCode.split("-")[0];
-}
-
-/**
- * The target code to use after a swap. Some source codes are ambiguous as
- * targets — DeepL wants a variant of English and Portuguese — so pick one.
- */
-export function toTargetCode(sourceCode: string, targets: Language[]): string {
-  if (!sourceCode) return "";
-  if (targets.some((t) => t.language === sourceCode)) return sourceCode;
-  const variant = targets.find(
-    (t) => t.language.split("-")[0] === sourceCode.split("-")[0],
-  );
-  return variant?.language ?? sourceCode;
-}
-
-export function supportsFormality(targets: Language[], code: string): boolean {
-  return targets.find((t) => t.language === code)?.supportsFormality ?? false;
+export function resolve(languages: Language[], code: string): string {
+  if (!code) return "";
+  if (languages.some((l) => l.code === code)) return code;
+  const base = code.split("-")[0].toLowerCase();
+  return languages.find((l) => l.code.split("-")[0] === base)?.code ?? code;
 }

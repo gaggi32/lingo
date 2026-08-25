@@ -30,3 +30,22 @@ export interface PopShow {
 
 export const onPopShow = (cb: (p: PopShow) => void): Promise<UnlistenFn> =>
   listen<PopShow>("pop-show", (e) => cb(e.payload));
+
+/**
+ * Rust emits this after every translation, and whenever Google refuses for
+ * quota. The usage meter lives in the desk window but the pop-up is what
+ * usually spends the allowance, so the meter cannot rely on its own window for
+ * news.
+ */
+export const onUsageChanged = (cb: () => void): Promise<UnlistenFn> =>
+  listen("usage-changed", () => cb());
+
+/**
+ * Rust emits this when the API key is saved or removed.
+ *
+ * Both windows care: the pop-up stops asking for a key the moment the desk
+ * window has been given one, and the language list is re-fetched because the
+ * first key is what makes fetching it possible at all.
+ */
+export const onKeyChanged = (cb: () => void): Promise<UnlistenFn> =>
+  listen("key-changed", () => cb());

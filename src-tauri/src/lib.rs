@@ -2,11 +2,13 @@
 //!
 //! Two windows share one process: `pop`, a borderless card summoned by a global
 //! hotkey, and the desk window (labelled `main`) with history and settings.
-//! Rust owns the hotkey, the tray, the settings file and every call to DeepL;
-//! the webviews own presentation and the history queries.
+//! Rust owns the hotkey, the tray, the settings file, the Google Cloud API key,
+//! the monthly usage tally and every call to Google; the webviews own
+//! presentation and the history queries.
 
-mod deepl;
+mod google;
 mod settings;
+mod usage;
 
 use std::str::FromStr;
 use std::sync::Mutex;
@@ -22,7 +24,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
-use settings::Settings;
+use settings::{Settings, Stored};
 
 const POP_LABEL: &str = "pop";
 const MAIN_LABEL: &str = "main";
@@ -34,15 +36,31 @@ const AUTOSTART_FLAG: &str = "--hidden";
 /// History database, resolved by tauri-plugin-sql inside the app data dir.
 const DB_URL: &str = "sqlite:lingo.db";
 
-/// Clipboard text longer than this is almost certainly not something anyone
-/// meant to translate in a pop-up, and it would burn quota to find out.
-const MAX_SEED_CHARS: usize = 4000;
+/// Clipboard text longer than this does not seed the pop-up.
+///
+/// Deliberately well under what the desk window will translate. The pop-up
+/// translates its seed without being asked, and Google bills by the character —
+/// so a hotkey press nobody meant as a translation request should not turn a
+/// copied document into a line on someone's invoice.
+const MAX_SEED_CHARS: usize = 1000;
+
+/// Told to the webviews after every translation, so the usage meter in the desk
+/// window reflects what the pop-up just spent.
+const USAGE_CHANGED: &str = "usage-changed";
+
+/// Told to the webviews when a key is saved or removed, so the pop-up stops
+/// asking for one the moment the desk window has been given it.
+const KEY_CHANGED: &str = "key-changed";
 
 struct AppState {
     /// One client for the process: connection reuse matters when live
     /// translation fires a request every few keystrokes.
     http: reqwest::Client,
     settings: Mutex<Settings>,
+    /// Held apart from the settings, and never serialised to a webview. See the
+    /// module docs in `settings.rs`.
+    api_key: Mutex<String>,
+    usage: Mutex<usage::Usage>,
 }
 
 impl AppState {
@@ -53,12 +71,44 @@ impl AppState {
             .expect("settings mutex poisoned")
             .clone()
     }
+
+    fn key(&self) -> String {
+        self.api_key.lock().expect("key mutex poisoned").clone()
+    }
 }
 
 /// Payload for the `pop-show` event: text to start from, if there is any.
 #[derive(Clone, Serialize)]
 struct PopShow {
     seed: Option<String>,
+}
+
+/// Whether a key is set, and just enough of it to tell one from another.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KeyStatus {
+    present: bool,
+    /// The last four characters, or "" when there is no key.
+    hint: String,
+}
+
+impl KeyStatus {
+    fn of(api_key: &str) -> Self {
+        Self {
+            present: !api_key.trim().is_empty(),
+            hint: settings::key_hint(api_key),
+        }
+    }
+}
+
+/// The source language to send, or `None` to let Google detect it.
+fn pinned_source(code: &str) -> Option<String> {
+    let c = code.trim();
+    if c.is_empty() || c.eq_ignore_ascii_case("auto") {
+        None
+    } else {
+        Some(c.to_owned())
+    }
 }
 
 // ---- Windows ----------------------------------------------------------------
@@ -120,7 +170,11 @@ fn get_settings(state: tauri::State<'_, AppState>) -> Settings {
     state.snapshot()
 }
 
-/// Persist the whole settings object and re-apply anything with a live effect.
+/// Persist the preferences and re-apply anything with a live effect.
+///
+/// The key is not part of what comes back from the webview, so it is read from
+/// state and written out alongside — a settings object that has been sitting in
+/// a stale React tree cannot take the key with it.
 #[tauri::command]
 fn save_settings(
     app: AppHandle,
@@ -128,14 +182,26 @@ fn save_settings(
     next: Settings,
 ) -> Result<Settings, String> {
     let previous = state.snapshot();
-    settings::save(&app, &next)?;
+    settings::save(
+        &app,
+        &Stored {
+            api_key: state.key(),
+            prefs: next.clone(),
+        },
+    )?;
 
     if next.hotkey != previous.hotkey {
         // A rejected accelerator must not leave the app with no hotkey at all,
         // so put the old one back before reporting the failure.
         if let Err(e) = register_hotkey(&app, &next.hotkey) {
             let _ = register_hotkey(&app, &previous.hotkey);
-            let _ = settings::save(&app, &previous);
+            let _ = settings::save(
+                &app,
+                &Stored {
+                    api_key: state.key(),
+                    prefs: previous,
+                },
+            );
             return Err(e);
         }
     }
@@ -144,82 +210,154 @@ fn save_settings(
     Ok(next)
 }
 
-/// Whether a key has been configured at all. The UI uses this to choose between
-/// the translator and the "add your key" prompt without ever reading the key.
 #[tauri::command]
-fn has_key(state: tauri::State<'_, AppState>) -> bool {
-    !state.snapshot().api_key.trim().is_empty()
+fn key_status(state: tauri::State<'_, AppState>) -> KeyStatus {
+    KeyStatus::of(&state.key())
 }
 
-/// Free keys are metered against a monthly character allowance; Pro keys
-/// usually are not. The usage meter labels itself differently for each.
+/// Save an API key. Not checked here — [`verify_key`] does that, and a key
+/// typed while offline should still be storable.
 #[tauri::command]
-fn key_is_free(state: tauri::State<'_, AppState>) -> bool {
-    deepl::is_free_key(&state.snapshot().api_key)
+fn set_api_key(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    key: String,
+) -> Result<KeyStatus, String> {
+    let key = key.trim().to_owned();
+    if key.is_empty() {
+        return Err("Paste your Google Cloud API key first.".into());
+    }
+    // Whitespace inside a key is always a copy-paste accident, and Google's
+    // refusal for it is unhelpfully vague.
+    if key.chars().any(char::is_whitespace) {
+        return Err("That key has a space in it. Copy it again, whole.".into());
+    }
+
+    settings::save(
+        &app,
+        &Stored {
+            api_key: key.clone(),
+            prefs: state.snapshot(),
+        },
+    )?;
+    *state.api_key.lock().expect("key mutex poisoned") = key.clone();
+    let _ = app.emit(KEY_CHANGED, ());
+    Ok(KeyStatus::of(&key))
+}
+
+#[tauri::command]
+fn clear_api_key(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<KeyStatus, String> {
+    settings::save(
+        &app,
+        &Stored {
+            api_key: String::new(),
+            prefs: state.snapshot(),
+        },
+    )?;
+    state.api_key.lock().expect("key mutex poisoned").clear();
+    let _ = app.emit(KEY_CHANGED, ());
+    Ok(KeyStatus::of(""))
+}
+
+/// Prove the saved key works, without spending a character.
+///
+/// The languages endpoint is not billed, so this checks the key, that the Cloud
+/// Translation API is enabled on its project, and that billing is in order —
+/// for free. It answers with how many languages came back, which is the most
+/// reassuring thing it could say.
+#[tauri::command]
+async fn verify_key(state: tauri::State<'_, AppState>) -> Result<usize, String> {
+    let key = state.key();
+    google::languages(&state.http, &key)
+        .await
+        .map(|list| list.len())
+        .map_err(String::from)
+}
+
+/// Everything Google will translate, fetched with the saved key.
+///
+/// Google publishes this and it changes, so Lingo asks rather than guesses. The
+/// frontend keeps a bundled list to fall back on when there is no key yet or no
+/// connection, so the pickers are never empty.
+#[tauri::command]
+async fn list_languages(state: tauri::State<'_, AppState>) -> Result<Vec<google::Language>, String> {
+    let key = state.key();
+    google::languages(&state.http, &key)
+        .await
+        .map_err(String::from)
+}
+
+/// Add a finished translation to the month's tally and tell both windows.
+fn bill(app: &AppHandle, state: &AppState, characters: u64) {
+    {
+        let mut tally = state.usage.lock().expect("usage mutex poisoned");
+        tally.spend(characters);
+        usage::save(app, &tally);
+    }
+    let _ = app.emit(USAGE_CHANGED, ());
+}
+
+/// Record that Google refused for quota, so the meter can say why the next
+/// attempt is going to fail as well.
+fn note_block(app: &AppHandle, state: &AppState) {
+    {
+        let mut tally = state.usage.lock().expect("usage mutex poisoned");
+        tally.blocked();
+        usage::save(app, &tally);
+    }
+    let _ = app.emit(USAGE_CHANGED, ());
 }
 
 #[tauri::command]
 async fn translate_text(
+    app: AppHandle,
     state: tauri::State<'_, AppState>,
     text: String,
     source_lang: String,
     target_lang: String,
-    formality: String,
-) -> Result<deepl::Translation, String> {
-    let key = state.snapshot().api_key;
-    if key.trim().is_empty() {
-        return Err("No DeepL API key yet — add one under Settings.".into());
-    }
+) -> Result<google::Translation, String> {
+    let key = state.key();
+    let source = pinned_source(&source_lang);
 
-    let source = {
-        let s = source_lang.trim();
-        if s.is_empty() || s.eq_ignore_ascii_case("auto") {
-            None
-        } else {
-            Some(s.to_owned())
-        }
-    };
-
-    deepl::translate(
+    let result = google::translate(
         &state.http,
-        &key,
-        &text,
-        source.as_deref(),
-        target_lang.trim(),
-        Some(formality.trim()),
+        google::Request {
+            text: &text,
+            source: source.as_deref(),
+            target: target_lang.trim(),
+            api_key: &key,
+        },
     )
-    .await
-}
+    .await;
 
-/// Check a key the user has typed but not saved yet. Succeeding here is the
-/// only confirmation Settings offers, so it doubles as the usage read.
-#[tauri::command]
-async fn verify_key(
-    state: tauri::State<'_, AppState>,
-    key: String,
-) -> Result<deepl::Usage, String> {
-    if key.trim().is_empty() {
-        return Err("Paste a DeepL API key first.".into());
+    match result {
+        Ok(t) => {
+            if t.characters > 0 {
+                bill(&app, &state, t.characters);
+            }
+            Ok(t)
+        }
+        Err(e) => {
+            if e.kind == google::ErrorKind::Quota {
+                note_block(&app, &state);
+            }
+            Err(e.message)
+        }
     }
-    deepl::usage(&state.http, &key).await
-}
-
-#[tauri::command]
-async fn deepl_usage(state: tauri::State<'_, AppState>) -> Result<deepl::Usage, String> {
-    let key = state.snapshot().api_key;
-    if key.trim().is_empty() {
-        return Err("No DeepL API key yet.".into());
-    }
-    deepl::usage(&state.http, &key).await
 }
 
 #[tauri::command]
-async fn deepl_languages(state: tauri::State<'_, AppState>) -> Result<deepl::Languages, String> {
-    let key = state.snapshot().api_key;
-    if key.trim().is_empty() {
-        return Err("No DeepL API key yet.".into());
-    }
-    deepl::languages(&state.http, &key).await
+fn usage_today(state: tauri::State<'_, AppState>) -> usage::Snapshot {
+    let mut tally = state.usage.lock().expect("usage mutex poisoned");
+    tally.roll();
+    tally.snapshot()
+}
+
+/// Longest text the desk window will offer to translate, so the two sides agree
+/// on the limit without hard-coding it twice.
+#[tauri::command]
+fn max_characters() -> usize {
+    google::MAX_TOTAL_CHARS
 }
 
 #[tauri::command]
@@ -356,12 +494,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,
-            has_key,
-            key_is_free,
-            translate_text,
+            key_status,
+            set_api_key,
+            clear_api_key,
             verify_key,
-            deepl_usage,
-            deepl_languages,
+            list_languages,
+            translate_text,
+            usage_today,
+            max_characters,
             hide_pop,
             open_desk,
             db_url,
@@ -388,6 +528,7 @@ pub fn run() {
 
             let handle = app.handle().clone();
             let loaded = settings::load(&handle);
+            let tally = usage::load(&handle);
 
             let http = reqwest::Client::builder()
                 .user_agent(concat!("Lingo/", env!("CARGO_PKG_VERSION")))
@@ -395,14 +536,29 @@ pub fn run() {
                 .build()
                 .expect("could not build the HTTP client");
 
+            let hotkey = loaded.prefs.hotkey.clone();
             app.manage(AppState {
                 http,
-                settings: Mutex::new(loaded.clone()),
+                settings: Mutex::new(loaded.prefs),
+                api_key: Mutex::new(loaded.api_key),
+                usage: Mutex::new(tally),
             });
+
+            // Both windows are declared in tauri.conf.json with `"create":
+            // false` and built here instead.
+            //
+            // Tauri creates config-declared windows *before* it runs this hook,
+            // which would let a webview finish loading and invoke a command
+            // while the state above was still being read off disk — a race the
+            // frontend sees as "state not managed for field `state`". Building
+            // them by hand puts the two in the only order that is safe.
+            for window in &app.config().app.windows {
+                tauri::WebviewWindowBuilder::from_config(&handle, window)?.build()?;
+            }
 
             // Registered here, before any webview has finished loading, so the
             // hotkey works from the moment the tray icon appears.
-            if let Err(e) = register_hotkey(&handle, &loaded.hotkey) {
+            if let Err(e) = register_hotkey(&handle, &hotkey) {
                 eprintln!("{e} — falling back to {}", settings::DEFAULT_HOTKEY);
                 let _ = register_hotkey(&handle, settings::DEFAULT_HOTKEY);
             }
@@ -426,4 +582,31 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Lingo");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unpinned_source_is_left_for_google_to_work_out() {
+        assert_eq!(pinned_source(""), None);
+        assert_eq!(pinned_source("   "), None);
+        assert_eq!(pinned_source("auto"), None);
+        assert_eq!(pinned_source("AUTO"), None);
+        assert_eq!(pinned_source(" de "), Some("de".into()));
+    }
+
+    #[test]
+    fn key_status_shows_that_there_is_a_key_without_showing_it() {
+        let full = "AIzaSyD-EXAMPLE-KEY-wxyz";
+        let status = KeyStatus::of(full);
+        assert!(status.present);
+        assert_eq!(status.hint, "…wxyz");
+        assert!(!status.hint.contains("AIza"));
+
+        let empty = KeyStatus::of("  ");
+        assert!(!empty.present);
+        assert_eq!(empty.hint, "");
+    }
 }

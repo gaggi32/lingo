@@ -32,7 +32,10 @@
     "autostart:allow-is-enabled",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://*.deepl.com/*" }]
+      "allow": [
+        { "url": "https://console.cloud.google.com/*" },
+        { "url": "https://cloud.google.com/*" }
+      ]
     }
   ]
 }

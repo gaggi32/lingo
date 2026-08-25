@@ -13,6 +13,7 @@ import {
   CopyIcon,
   EnterIcon,
   ExpandIcon,
+  KeyIcon,
   SwapIcon,
 } from "../components/icons";
 import {
@@ -23,15 +24,11 @@ import {
   translate,
 } from "../lib/api";
 import { onPopShow, onSettingsChanged } from "../lib/events";
-import {
-  nameOf,
-  supportsFormality,
-  toSourceCode,
-  toTargetCode,
-} from "../lib/languages";
-import { record } from "../lib/history";
+import { nameOf, resolve } from "../lib/languages";
+import { useKeyStatus } from "../lib/useKeyStatus";
 import { useLanguages } from "../lib/useLanguages";
-import type { Settings } from "../lib/types";
+import { record } from "../lib/history";
+import type { Settings, Translation } from "../lib/types";
 
 /** Must match the `pop` window width in tauri.conf.json. */
 const WIDTH = 560;
@@ -50,13 +47,13 @@ type Picker = "source" | "target" | null;
 export default function Pop() {
   const win = getCurrentWindow();
   const languages = useLanguages();
+  const keyStatus = useKeyStatus();
 
   const [settings, setSettings] = useState<Settings | null>(null);
   const [source, setSource] = useState("");
-  const [target, setTarget] = useState("EN-GB");
+  const [target, setTarget] = useState("en");
   const [input, setInput] = useState("");
-  const [result, setResult] = useState("");
-  const [detected, setDetected] = useState("");
+  const [result, setResult] = useState<Translation | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [picker, setPicker] = useState<Picker>(null);
@@ -70,6 +67,9 @@ export default function Pop() {
   const appliedHeight = useRef(0);
   /** Guards against a slow response overwriting a newer one. */
   const requestSeq = useRef(0);
+
+  /** `null` means "not asked yet", which is not the same as "no key". */
+  const needsKey = keyStatus !== null && !keyStatus.present;
 
   const focusInput = () =>
     requestAnimationFrame(() => {
@@ -193,8 +193,7 @@ export default function Pop() {
       const seq = ++requestSeq.current;
 
       if (!trimmed) {
-        setResult("");
-        setDetected("");
+        setResult(null);
         setError("");
         setBusy(false);
         return;
@@ -207,44 +206,39 @@ export default function Pop() {
           text: trimmed,
           sourceLang: from,
           targetLang: to,
-          formality: supportsFormality(languages.target, to)
-            ? (settings?.formality ?? "default")
-            : "default",
         });
         if (seq !== requestSeq.current) return; // superseded
-        setResult(t.text);
-        setDetected(t.detectedSourceLanguage);
+        setResult(t);
         if (settings?.autoCopy) await writeText(t.text);
       } catch (err) {
         if (seq !== requestSeq.current) return;
         setError(errorText(err));
-        setResult("");
+        setResult(null);
       } finally {
         if (seq === requestSeq.current) setBusy(false);
       }
     },
-    [languages.target, settings],
+    [settings],
   );
 
   // Live translation: fire once the typing settles.
   useEffect(() => {
     if (!settings?.liveTranslate) return;
+    if (needsKey) return;
     if (!input.trim()) {
-      setResult("");
-      setDetected("");
+      setResult(null);
       return;
     }
     const t = setTimeout(() => void run(input, source, target), DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [input, source, target, settings?.liveTranslate, run]);
+  }, [input, source, target, settings?.liveTranslate, needsKey, run]);
 
   // ---- Summoning -----------------------------------------------------------
 
   const reset = useCallback((seed: string) => {
     requestSeq.current++;
     setInput(seed);
-    setResult("");
-    setDetected("");
+    setResult(null);
     setError("");
     setBusy(false);
     setPicker(null);
@@ -261,7 +255,7 @@ export default function Pop() {
         focusInput();
         // A seeded card should already be showing the answer by the time the
         // user has finished reading it, so skip the debounce.
-        if (seed?.trim() && s) {
+        if (seed?.trim() && s && !needsKey) {
           void run(seed, s.sourceLang, s.targetLang);
         }
       })();
@@ -269,7 +263,7 @@ export default function Pop() {
     return () => {
       un.then((f) => f());
     };
-  }, [loadSettings, place, reset, run]);
+  }, [loadSettings, needsKey, place, reset, run]);
 
   // First mount: position the (still hidden) window so the first summon does
   // not visibly jump into place.
@@ -280,6 +274,8 @@ export default function Pop() {
 
   // ---- Actions -------------------------------------------------------------
 
+  const detected = result?.detectedSourceLanguage ?? "";
+
   const dismiss = useCallback(async () => {
     setPicker(null);
     await hidePop();
@@ -287,13 +283,13 @@ export default function Pop() {
 
   const commit = useCallback(async () => {
     if (!result) return;
-    await writeText(result);
+    await writeText(result.text);
     setCopied((n) => n + 1);
     if (settings?.saveHistory) {
       try {
         await record({
           sourceText: input.trim(),
-          targetText: result,
+          targetText: result.text,
           sourceLang: detected || source || "auto",
           targetLang: target,
         });
@@ -311,21 +307,22 @@ export default function Pop() {
 
   /**
    * Swap the pair and carry the translation back into the input — the natural
-   * next move when you are going back and forth with someone.
+   * next move when you are going back and forth with someone. On Detect there
+   * is nothing to swap into until something has actually been detected.
    */
+  const swappable = Boolean(source || detected);
+
   const swap = useCallback(() => {
-    const nextSource = toSourceCode(target);
-    const nextTarget = toTargetCode(source || detected, languages.target);
-    setSource(nextSource);
-    if (nextTarget) setTarget(nextTarget);
+    if (!swappable) return;
+    setSource(target);
+    setTarget(resolve(languages, source || detected));
     if (result) {
-      setInput(result);
-      setResult("");
-      setDetected("");
+      setInput(result.text);
+      setResult(null);
     }
     setPicker(null);
     focusInput();
-  }, [source, target, detected, result, languages.target]);
+  }, [languages, source, target, detected, result, swappable]);
 
   const expand = useCallback(async () => {
     await openDesk();
@@ -354,6 +351,7 @@ export default function Pop() {
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== "Enter" || e.shiftKey) return;
     e.preventDefault();
+    if (needsKey) return;
     if (result) void commitAndClose();
     else void run(input, source, target);
   };
@@ -367,10 +365,9 @@ export default function Pop() {
     el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }, [input, picker]);
 
-  const sourceLabel = source ? nameOf(languages.source, source) : "Detect";
-  const targetLabel = nameOf(languages.target, target);
-  const detectedName =
-    !source && detected ? nameOf(languages.source, detected) : "";
+  const sourceLabel = source ? nameOf(languages, source) : "Detect";
+  const targetLabel = nameOf(languages, target);
+  const detectedName = !source && detected ? nameOf(languages, detected) : "";
 
   return (
     <div className="h-screen w-screen p-2.5">
@@ -397,8 +394,13 @@ export default function Pop() {
             <button
               type="button"
               onClick={swap}
-              title="Swap languages and reuse the translation"
-              className="ghost px-1.5"
+              disabled={!swappable}
+              title={
+                swappable
+                  ? "Swap languages and reuse the translation"
+                  : "Pick a source language, or translate once, before swapping"
+              }
+              className="ghost px-1.5 disabled:opacity-30 disabled:hover:bg-transparent"
             >
               <SwapIcon className="text-[14px]" />
             </button>
@@ -412,11 +414,7 @@ export default function Pop() {
             />
 
             {/* Empty stretch doubles as the window's drag region. */}
-            <div
-              className="h-7 flex-1"
-              data-tauri-drag-region
-              aria-hidden
-            />
+            <div className="h-7 flex-1" data-tauri-drag-region aria-hidden />
 
             {detectedName && (
               <span className="accent-soft hidden shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide sm:inline">
@@ -437,9 +435,7 @@ export default function Pop() {
           {picker ? (
             <div className="pop-in p-2.5">
               <LangList
-                languages={
-                  picker === "source" ? languages.source : languages.target
-                }
+                languages={languages}
                 value={picker === "source" ? source : target}
                 allowAuto={picker === "source"}
                 onPick={(code) => {
@@ -450,6 +446,8 @@ export default function Pop() {
                 }}
               />
             </div>
+          ) : needsKey ? (
+            <NoKey onOpenSettings={() => void expand()} />
           ) : (
             <>
               <textarea
@@ -478,11 +476,11 @@ export default function Pop() {
                 </p>
               ) : result ? (
                 <p
-                  key={result}
+                  key={result.text}
                   data-selectable
-                  className="ink-in tidy-scroll max-h-[220px] overflow-y-auto px-4 py-3 font-reading text-[16px] leading-relaxed text-slate-900 dark:text-slate-100"
+                  className="ink-in tidy-scroll max-h-[220px] overflow-y-auto whitespace-pre-wrap px-4 py-3 font-reading text-[16px] leading-relaxed text-slate-900 dark:text-slate-100"
                 >
-                  {result}
+                  {result.text}
                 </p>
               ) : (
                 <p className="px-4 py-3 text-[13px] text-slate-400 dark:text-slate-500">
@@ -532,6 +530,35 @@ export default function Pop() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The card before there is a key.
+ *
+ * The pop-up has nowhere to paste one — it is dismissed by its own blur, which
+ * a paste dialog would trigger — so it says what is missing and hands over to
+ * the desk window, which is where the field lives.
+ */
+function NoKey({ onOpenSettings }: { onOpenSettings: () => void }) {
+  return (
+    <div className="px-4 pb-4 pt-2">
+      <p className="flex items-center gap-2 text-[14px] font-medium text-slate-900 dark:text-slate-100">
+        <KeyIcon className="text-[15px] text-iris-500" />
+        Lingo needs a Google Cloud API key
+      </p>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
+        Add one in Settings and this card starts translating. Google&apos;s
+        first 500,000 characters each month are free.
+      </p>
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        className="accent accent-hover mt-3 rounded-lg px-3.5 py-1.5 text-[13px] font-semibold transition"
+      >
+        Open Settings
+      </button>
     </div>
   );
 }

@@ -10,7 +10,6 @@ import {
   ClockIcon,
   LanguagesIcon,
   SettingsIcon,
-  KeyIcon,
 } from "../components/icons";
 import type { HistoryEntry, Settings } from "../lib/types";
 
@@ -63,8 +62,6 @@ export default function App() {
     return <div className="app-bg h-screen w-screen" />;
   }
 
-  const needsKey = !settings.apiKey.trim();
-
   return (
     <div className="app-bg flex h-screen w-screen overflow-hidden text-slate-900 dark:text-slate-100">
       {/* ---- Rail ---------------------------------------------------------- */}
@@ -77,7 +74,7 @@ export default function App() {
           <div className="leading-tight">
             <p className="text-[14px] font-semibold tracking-tight">Lingo</p>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              via DeepL
+              via Google Cloud
             </p>
           </div>
         </div>
@@ -102,21 +99,8 @@ export default function App() {
           ))}
         </ul>
 
-        {needsKey && view !== "settings" && (
-          <button
-            type="button"
-            onClick={() => setView("settings")}
-            className="mt-4 flex items-start gap-2 rounded-lg border border-iris-500/25 bg-iris-50 px-2.5 py-2 text-left text-[12px] leading-snug text-iris-800 transition-colors hover:bg-iris-100 dark:border-iris-400/25 dark:bg-iris-500/10 dark:text-iris-200 dark:hover:bg-iris-500/20"
-          >
-            <KeyIcon className="mt-[2px] shrink-0 text-[13px]" />
-            <span>
-              Add your DeepL API key to start translating.
-            </span>
-          </button>
-        )}
-
         <div className="mt-auto space-y-3 px-1 pt-4">
-          <UsageMeter apiKey={settings.apiKey} />
+          <UsageMeter />
 
           <p className="flex flex-wrap items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500">
             <span>Pop-up</span>
@@ -140,6 +124,7 @@ export default function App() {
             save={save}
             handoff={handoff}
             onHandoffUsed={() => setHandoff(null)}
+            onOpenSettings={() => setView("settings")}
           />
         )}
         {view === "history" && <History onOpen={openInTranslator} />}

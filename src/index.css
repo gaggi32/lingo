@@ -280,3 +280,26 @@ html.pop [data-selectable] {
 textarea {
   resize: none;
 }
+
+/* ----------------------------------------------------------------------------
+ * Password fields get one eye, not two.
+ *
+ * Lingo draws its own reveal button on the API key field, so that it can sit
+ * inside the input's padding and match everything else. The webview draws one
+ * too — Edge/WebView2 adds `::-ms-reveal` on Windows, WebKit adds a
+ * strong-password button on macOS — and neither can be styled or moved. They
+ * are switched off so the one that is ours is the only one there.
+ * ------------------------------------------------------------------------- */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+input[type="password"]::-webkit-credentials-auto-fill-button,
+input[type="password"]::-webkit-strong-password-auto-fill-button,
+input[type="password"]::-webkit-textfield-decoration-container {
+  display: none !important;
+  visibility: hidden;
+  pointer-events: none;
+  width: 0;
+  margin: 0;
+}

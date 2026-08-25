@@ -1,11 +1,16 @@
-/** Mirrors `Settings` in src-tauri/src/settings.rs (serialised camelCase). */
+/**
+ * Mirrors `Settings` in src-tauri/src/settings.rs (serialised camelCase).
+ *
+ * The Google Cloud API key is deliberately not here. Rust keeps it out of every
+ * payload that crosses into a webview, so this object can be round-tripped
+ * freely without a stale copy ever blanking the credential. See
+ * {@link KeyStatus} for what the UI is allowed to know about it.
+ */
 export interface Settings {
-  apiKey: string;
-  /** Target language code, e.g. "DE" or "EN-GB". */
+  /** Target language code, e.g. "de" or "zh-CN". */
   targetLang: string;
-  /** Source language code; "" means let DeepL detect it. */
+  /** Source language code; "" means let Google detect it. */
   sourceLang: string;
-  formality: Formality;
   /** Tauri accelerator, e.g. "CommandOrControl+Shift+L". */
   hotkey: string;
   prefillClipboard: boolean;
@@ -14,30 +19,38 @@ export interface Settings {
   liveTranslate: boolean;
 }
 
-export type Formality = "default" | "prefer_more" | "prefer_less";
+/** Everything the UI is told about the saved API key. */
+export interface KeyStatus {
+  present: boolean;
+  /** The last four characters as "…wxyz", or "" when there is no key. */
+  hint: string;
+}
 
-/** Mirrors `deepl::Translation`. */
+/** Mirrors `google::Translation`. */
 export interface Translation {
-  detectedSourceLanguage: string;
   text: string;
+  /** "" when the source language was pinned rather than detected. */
+  detectedSourceLanguage: string;
+  /** Characters Google will bill for. 0 when nothing was actually sent. */
+  characters: number;
 }
 
-/** Mirrors `deepl::Usage`. */
+/** Mirrors `usage::Snapshot` — Lingo's own count of what this month has cost. */
 export interface Usage {
-  characterCount: number;
-  characterLimit: number;
+  characters: number;
+  /** Characters a calendar month Google does not charge for. */
+  freeTier: number;
+  /** Dollars per million characters past the free tier. */
+  usdPerMillion: number;
+  /** Google last refused for quota, and will again until something changes. */
+  quotaBlocked: boolean;
 }
 
-/** Mirrors `deepl::Language`. */
+/** One entry in the language table. */
 export interface Language {
-  language: string;
+  /** The code Google wants, e.g. "de" or "zh-CN". */
+  code: string;
   name: string;
-  supportsFormality: boolean;
-}
-
-export interface Languages {
-  source: Language[];
-  target: Language[];
 }
 
 /** One row of the local history table. */

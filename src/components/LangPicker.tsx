@@ -37,7 +37,7 @@ export function LangList({
     if (!q) return languages;
     return languages.filter(
       (l) =>
-        l.name.toLowerCase().includes(q) || l.language.toLowerCase().includes(q),
+        l.name.toLowerCase().includes(q) || l.code.toLowerCase().includes(q),
     );
   }, [languages, query]);
 
@@ -49,7 +49,7 @@ export function LangList({
     if (e.key !== "Enter") return;
     e.preventDefault();
     e.stopPropagation();
-    if (matches.length > 0) onPick(matches[0].language);
+    if (matches.length > 0) onPick(matches[0].code);
   };
 
   return (
@@ -81,11 +81,11 @@ export function LangList({
 
         {matches.map((l) => (
           <Row
-            key={l.language}
-            code={l.language}
+            key={l.code}
+            code={l.code}
             name={l.name}
-            active={value === l.language}
-            onPick={() => onPick(l.language)}
+            active={value === l.code}
+            onPick={() => onPick(l.code)}
           />
         ))}
 

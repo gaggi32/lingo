@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Lingo — a cross-platform pop-up translator powered by the DeepL API (Tauri v2 + React).",
+  "description": "Lingo — a cross-platform pop-up translator powered by the Google Cloud Translation API (Tauri v2 + React).",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

@@ -6,29 +6,23 @@ import {
   CheckIcon,
   CopyIcon,
   CloseIcon,
+  KeyIcon,
   SwapIcon,
 } from "../components/icons";
-import { errorText, translate } from "../lib/api";
-import {
-  nameOf,
-  supportsFormality,
-  toSourceCode,
-  toTargetCode,
-} from "../lib/languages";
-import { record } from "../lib/history";
+import { errorText, maxCharacters, translate } from "../lib/api";
+import { nameOf, resolve } from "../lib/languages";
+import { useKeyStatus } from "../lib/useKeyStatus";
 import { useLanguages } from "../lib/useLanguages";
-import type { Formality, HistoryEntry, Settings } from "../lib/types";
+import { record } from "../lib/history";
+import type { HistoryEntry, Settings, Translation } from "../lib/types";
 
 const DEBOUNCE_MS = 600;
 
-/** DeepL caps a single request; well short of it is a better place to stop. */
-const MAX_CHARS = 5000;
-
-const FORMALITY: { id: Formality; label: string }[] = [
-  { id: "prefer_less", label: "Casual" },
-  { id: "default", label: "Neutral" },
-  { id: "prefer_more", label: "Formal" },
-];
+/**
+ * Fallback until Rust answers with the real figure, which lives in `google.rs`
+ * so the cap is defined once rather than in two languages.
+ */
+const FALLBACK_MAX_CHARS = 5000;
 
 interface Props {
   settings: Settings;
@@ -36,6 +30,8 @@ interface Props {
   /** A history row the user asked to reopen here. */
   handoff: HistoryEntry | null;
   onHandoffUsed: () => void;
+  /** Take the user to where the API key is entered. */
+  onOpenSettings: () => void;
 }
 
 export default function Workbench({
@@ -43,21 +39,34 @@ export default function Workbench({
   save,
   handoff,
   onHandoffUsed,
+  onOpenSettings,
 }: Props) {
   const languages = useLanguages();
+  const keyStatus = useKeyStatus();
 
   const [source, setSource] = useState(settings.sourceLang);
   const [target, setTarget] = useState(settings.targetLang);
   const [input, setInput] = useState("");
-  const [result, setResult] = useState("");
-  const [detected, setDetected] = useState("");
+  const [result, setResult] = useState<Translation | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [picker, setPicker] = useState<"source" | "target" | null>(null);
   const [copied, setCopied] = useState(0);
+  const [maxChars, setMaxChars] = useState(FALLBACK_MAX_CHARS);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const requestSeq = useRef(0);
+
+  /** `null` means "not asked yet", which is not the same as "no key". */
+  const needsKey = keyStatus !== null && !keyStatus.present;
+
+  useEffect(() => {
+    maxCharacters()
+      .then(setMaxChars)
+      .catch(() => {
+        /* The fallback is the same number; it just isn't authoritative. */
+      });
+  }, []);
 
   // Keep the pair in step when Settings (or the pop-up) changes the defaults.
   useEffect(() => {
@@ -70,17 +79,14 @@ export default function Workbench({
   useEffect(() => {
     if (!handoff) return;
     setInput(handoff.sourceText);
-    setResult(handoff.targetText);
-    setDetected(handoff.sourceLang);
+    // A stored row is a record of an answer, not the answer itself, so the
+    // target pane stays empty until it is translated again.
+    setResult(null);
     setTarget(handoff.targetLang);
     setError("");
     onHandoffUsed();
     inputRef.current?.focus();
   }, [handoff, onHandoffUsed]);
-
-  const formality: Formality = supportsFormality(languages.target, target)
-    ? settings.formality
-    : "default";
 
   const run = useCallback(
     async (text: string, from: string, to: string, remember: boolean) => {
@@ -88,8 +94,7 @@ export default function Workbench({
       const seq = ++requestSeq.current;
 
       if (!trimmed) {
-        setResult("");
-        setDetected("");
+        setResult(null);
         setError("");
         return;
       }
@@ -101,13 +106,9 @@ export default function Workbench({
           text: trimmed,
           sourceLang: from,
           targetLang: to,
-          formality: supportsFormality(languages.target, to)
-            ? settings.formality
-            : "default",
         });
         if (seq !== requestSeq.current) return; // a newer request won
-        setResult(t.text);
-        setDetected(t.detectedSourceLanguage);
+        setResult(t);
         if (settings.autoCopy) await writeText(t.text);
         if (remember && settings.saveHistory) {
           await record({
@@ -120,29 +121,39 @@ export default function Workbench({
       } catch (err) {
         if (seq !== requestSeq.current) return;
         setError(errorText(err));
-        setResult("");
+        setResult(null);
       } finally {
         if (seq === requestSeq.current) setBusy(false);
       }
     },
-    [languages.target, settings.formality, settings.autoCopy, settings.saveHistory],
+    [settings.autoCopy, settings.saveHistory],
   );
+
+  const over = input.trim().length > maxChars;
 
   // Live translation. Deliberately does not write history — only a deliberate
   // Translate or a copy does, so the log stays a record of what mattered.
   useEffect(() => {
     if (!settings.liveTranslate) return;
     if (!input.trim()) {
-      setResult("");
-      setDetected("");
+      setResult(null);
       return;
     }
+    // Past the cap every request would be refused; there is no sense spending
+    // a round trip per keystroke to be told so.
+    if (input.trim().length > maxChars) return;
+    // Without a key every request fails the same way, and the pane already says
+    // so in words worth more than a repeated error.
+    if (needsKey) return;
+
     const t = setTimeout(
       () => void run(input, source, target, false),
       DEBOUNCE_MS,
     );
     return () => clearTimeout(t);
-  }, [input, source, target, settings.liveTranslate, run]);
+  }, [input, source, target, settings.liveTranslate, maxChars, needsKey, run]);
+
+  const detected = result?.detectedSourceLanguage ?? "";
 
   const pickSource = (code: string) => {
     setSource(code);
@@ -156,32 +167,34 @@ export default function Workbench({
     void save({ ...settings, targetLang: code });
   };
 
+  /**
+   * Flip the pair and carry the translation back into the input. With the
+   * source on Detect there is nothing to flip into until something has been
+   * detected, which is why the button waits for a result.
+   */
+  const swappable = Boolean(source || detected);
+
   const swap = () => {
-    const nextSource = toSourceCode(target);
-    const nextTarget = toTargetCode(source || detected, languages.target);
+    if (!swappable) return;
+    const nextSource = target;
+    const nextTarget = resolve(languages, source || detected);
     setSource(nextSource);
-    if (nextTarget) setTarget(nextTarget);
+    setTarget(nextTarget);
     if (result) {
-      setInput(result);
-      setResult("");
-      setDetected("");
+      setInput(result.text);
+      setResult(null);
     }
-    void save({
-      ...settings,
-      sourceLang: nextSource,
-      targetLang: nextTarget || settings.targetLang,
-    });
+    void save({ ...settings, sourceLang: nextSource, targetLang: nextTarget });
   };
 
-  const copy = async () => {
-    if (!result) return;
-    await writeText(result);
+  const copy = async (text: string) => {
+    await writeText(text);
     setCopied((n) => n + 1);
     if (settings.saveHistory) {
       try {
         await record({
           sourceText: input.trim(),
-          targetText: result,
+          targetText: text,
           sourceLang: detected || source || "auto",
           targetLang: target,
         });
@@ -200,13 +213,11 @@ export default function Workbench({
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      void run(input, source, target, true);
+      if (!over) void run(input, source, target, true);
     }
   };
 
-  const over = input.length > MAX_CHARS;
-  const detectedName =
-    !source && detected ? nameOf(languages.source, detected) : "";
+  const detectedName = !source && detected ? nameOf(languages, detected) : "";
 
   return (
     <div className="flex h-full flex-col">
@@ -214,7 +225,7 @@ export default function Workbench({
       <header className="flex flex-wrap items-center gap-1.5 border-b border-slate-200/80 px-5 py-3 dark:border-slate-800">
         <div className="relative">
           <LangButton
-            label={source ? nameOf(languages.source, source) : "Detect language"}
+            label={source ? nameOf(languages, source) : "Detect language"}
             code={source || "auto"}
             open={picker === "source"}
             onToggle={() => setPicker((p) => (p === "source" ? null : "source"))}
@@ -222,7 +233,7 @@ export default function Workbench({
           {picker === "source" && (
             <LangPopover onClose={() => setPicker(null)}>
               <LangList
-                languages={languages.source}
+                languages={languages}
                 value={source}
                 allowAuto
                 rows={8}
@@ -235,15 +246,20 @@ export default function Workbench({
         <button
           type="button"
           onClick={swap}
-          title="Swap languages and reuse the translation"
-          className="ghost px-2"
+          disabled={!swappable}
+          title={
+            swappable
+              ? "Swap languages and reuse the translation"
+              : "Pick a source language, or translate once, before swapping"
+          }
+          className="ghost px-2 disabled:opacity-30 disabled:hover:bg-transparent"
         >
           <SwapIcon className="text-[15px]" />
         </button>
 
         <div className="relative">
           <LangButton
-            label={nameOf(languages.target, target)}
+            label={nameOf(languages, target)}
             code={target}
             open={picker === "target"}
             onToggle={() => setPicker((p) => (p === "target" ? null : "target"))}
@@ -251,7 +267,7 @@ export default function Workbench({
           {picker === "target" && (
             <LangPopover onClose={() => setPicker(null)}>
               <LangList
-                languages={languages.target}
+                languages={languages}
                 value={target}
                 rows={8}
                 onPick={pickTarget}
@@ -259,26 +275,6 @@ export default function Workbench({
             </LangPopover>
           )}
         </div>
-
-        {supportsFormality(languages.target, target) && (
-          <div className="ml-3 flex items-center gap-1 rounded-lg bg-slate-900/[0.05] p-0.5 dark:bg-white/5">
-            {FORMALITY.map(({ id, label }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => void save({ ...settings, formality: id })}
-                className={[
-                  "rounded-[6px] px-2 py-1 text-[12px] font-medium transition-colors",
-                  formality === id
-                    ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-50"
-                    : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100",
-                ].join(" ")}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
 
         <div className="ml-auto flex items-center gap-2">
           {busy && (
@@ -321,16 +317,15 @@ export default function Workbench({
                   : "text-slate-400 dark:text-slate-500",
               ].join(" ")}
             >
-              {input.length.toLocaleString()}
-              {over && ` / ${MAX_CHARS.toLocaleString()} max`}
+              {input.trim().length.toLocaleString()}
+              {over && ` / ${maxChars.toLocaleString()} max`}
             </span>
             {input && (
               <button
                 type="button"
                 onClick={() => {
                   setInput("");
-                  setResult("");
-                  setDetected("");
+                  setResult(null);
                   setError("");
                   inputRef.current?.focus();
                 }}
@@ -346,28 +341,32 @@ export default function Workbench({
         {/* Target */}
         <section className="flex min-h-0 flex-col bg-white/40 dark:bg-slate-950/30">
           <div className="tidy-scroll min-h-0 flex-1 overflow-y-auto px-5 py-4">
-            {error ? (
+            {needsKey ? (
+              <NoKey onOpenSettings={onOpenSettings} />
+            ) : error ? (
               <p className="ink-in flex items-start gap-2 text-[14px] text-rose-600 dark:text-rose-400">
                 <AlertIcon className="mt-[3px] shrink-0 text-[15px]" />
                 <span>{error}</span>
               </p>
             ) : result ? (
               <p
-                key={result}
+                key={result.text}
                 className="ink-in whitespace-pre-wrap font-reading text-[16px] leading-relaxed"
               >
-                {result}
+                {result.text}
               </p>
             ) : (
               <p className="text-[14px] text-slate-400 dark:text-slate-500">
-                {settings.liveTranslate
-                  ? "The translation appears here as you type."
-                  : "Press Translate, or Ctrl+Enter."}
+                {over
+                  ? `That is longer than the ${maxChars.toLocaleString()} characters Lingo translates in one go.`
+                  : settings.liveTranslate
+                    ? "The translation appears here as you type."
+                    : "Press Translate, or Ctrl+Enter."}
               </p>
             )}
           </div>
 
-          <div className="flex items-center gap-2 px-5 pb-3 pt-1">
+          <div className="flex flex-wrap items-center gap-2 px-5 pb-3 pt-1">
             {detectedName && (
               <span className="accent-soft rounded-md px-2 py-0.5 text-[11px] font-medium">
                 Detected {detectedName}
@@ -384,7 +383,7 @@ export default function Workbench({
             )}
             <button
               type="button"
-              onClick={() => void copy()}
+              onClick={() => result && void copy(result.text)}
               disabled={!result}
               className="ghost ml-auto disabled:opacity-40 disabled:hover:bg-transparent"
               title="Copy the translation and save it to History"
@@ -395,6 +394,34 @@ export default function Workbench({
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+/**
+ * What the target pane says before there is a key.
+ *
+ * Deliberately not an error: nothing has gone wrong, there is simply a step
+ * left, and the button goes straight to where that step happens.
+ */
+function NoKey({ onOpenSettings }: { onOpenSettings: () => void }) {
+  return (
+    <div className="max-w-sm">
+      <p className="flex items-center gap-2 text-[14px] font-medium">
+        <KeyIcon className="text-[15px] text-iris-500" />
+        Lingo needs a Google Cloud API key
+      </p>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
+        One key, pasted once, and the hotkey works everywhere. Google&apos;s
+        first 500,000 characters each month are free.
+      </p>
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        className="accent accent-hover mt-3 rounded-lg px-3.5 py-1.5 text-[13px] font-semibold transition"
+      >
+        Add a key
+      </button>
     </div>
   );
 }
