@@ -142,6 +142,11 @@ export function LangButton({ label, code, open, onToggle, title }: ButtonProps) 
   return (
     <button
       type="button"
+      // The popover's outside-click listener is on `mousedown` (see
+      // LangPopover) and this button sits outside the popover's own ref, so
+      // a click here closes it a beat before `onClick` fires — without this,
+      // that reopens it immediately, and a second click can never close it.
+      onMouseDown={(e) => e.stopPropagation()}
       onClick={onToggle}
       title={title}
       className={[

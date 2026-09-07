@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   currentMonitor,
@@ -45,7 +45,11 @@ const DEBOUNCE_MS = 450;
 type Picker = "source" | "target" | null;
 
 export default function Pop() {
-  const win = getCurrentWindow();
+  // `getCurrentWindow()` mints a fresh handle on every call, so calling it
+  // during render hands every dependency array below a new identity each time
+  // — which turns the mount-only effects into every-render effects, and
+  // `focusInput` into something that fights the user for the caret.
+  const win = useMemo(() => getCurrentWindow(), []);
   const languages = useLanguages();
   const keyStatus = useKeyStatus();
 
@@ -183,7 +187,10 @@ export default function Pop() {
     ro.observe(card);
     apply(card.getBoundingClientRect().height);
     return () => ro.disconnect();
-  }, [win]);
+    // `appear` re-keys the card, so each summon hands us a brand new node —
+    // without it here the observer would be left watching a detached one and
+    // the window would stop sizing itself after the first summon.
+  }, [win, appear]);
 
   // ---- Translating ---------------------------------------------------------
 
@@ -266,7 +273,9 @@ export default function Pop() {
   }, [loadSettings, needsKey, place, reset, run]);
 
   // First mount: position the (still hidden) window so the first summon does
-  // not visibly jump into place.
+  // not visibly jump into place. This runs once and must keep doing so — a
+  // `place` that changes identity per render would re-steal the caret on every
+  // keystroke, which is exactly what an unmemoised `win` used to cause.
   useEffect(() => {
     void place();
     focusInput();

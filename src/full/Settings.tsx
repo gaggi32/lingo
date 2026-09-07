@@ -64,14 +64,26 @@ export default function SettingsPanel({ settings, save }: Props) {
 function Section({
   title,
   hint,
+  raised,
   children,
 }: {
   title: string;
   hint?: string;
+  /**
+   * Lifts this card (and everything it contains) above the other Sections.
+   *
+   * Every card is its own stacking context — `.sheet` sets `backdrop-blur`,
+   * and `backdrop-filter` creates one — so a popover floated inside one card
+   * can never out-rank a *later* card no matter its z-index: the comparison
+   * happens one level up, between the cards themselves, and DOM order decides
+   * ties there. A card that is currently floating a popover needs to win that
+   * outer comparison too, which is what this does.
+   */
+  raised?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <section>
+    <section className={raised ? "relative z-10" : undefined}>
       <h2 className="text-[13px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
         {title}
       </h2>
@@ -376,6 +388,7 @@ function TranslationSection({ settings, save }: Props) {
     <Section
       title="Translation"
       hint="What the pop-up starts with each time it opens."
+      raised={picker !== null}
     >
       <Row label="Translate from">
         <div className="relative">

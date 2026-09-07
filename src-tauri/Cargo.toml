@@ -1,6 +1,6 @@
 [package]
 name = "lingo"
-version = "0.1.0"
+version = "0.1.1"
 description = "Lingo — pop-up translator powered by the Google Cloud Translation API"
 authors = ["gaggi32"]
 edition = "2021"
