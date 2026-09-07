@@ -26,6 +26,7 @@ import {
 } from "../lib/api";
 import { acceleratorToKeys, eventToChord } from "../lib/shortcut";
 import { nameOf } from "../lib/languages";
+import { startPair, withDefaultPair } from "../lib/pair";
 import { useKeyStatus } from "../lib/useKeyStatus";
 import { useLanguages } from "../lib/useLanguages";
 import type { Settings } from "../lib/types";
@@ -384,10 +385,13 @@ function TranslationSection({ settings, save }: Props) {
   const [picker, setPicker] = useState<"source" | "target" | null>(null);
   const languages = useLanguages();
 
+  const opening = startPair(settings);
+
   return (
     <Section
       title="Translation"
-      hint="What the pop-up starts with each time it opens."
+      hint="The pair a window opens on. Changing either one here takes effect
+            straight away, whichever way the switch below is set."
       raised={picker !== null}
     >
       <Row label="Translate from">
@@ -411,7 +415,7 @@ function TranslationSection({ settings, save }: Props) {
                 rows={7}
                 onPick={(code) => {
                   setPicker(null);
-                  void save({ ...settings, sourceLang: code });
+                  void save(withDefaultPair(settings, { source: code }));
                 }}
               />
             </LangPopover>
@@ -435,12 +439,39 @@ function TranslationSection({ settings, save }: Props) {
                 rows={7}
                 onPick={(code) => {
                   setPicker(null);
-                  void save({ ...settings, targetLang: code });
+                  void save(withDefaultPair(settings, { target: code }));
                 }}
               />
             </LangPopover>
           )}
         </div>
+      </Row>
+
+      <Row
+        label="Remember the last pair"
+        description={
+          settings.rememberLastLang
+            ? `Switching languages in the pop-up sticks. Right now that means ${nameOf(
+                languages,
+                opening.source,
+              )} → ${nameOf(languages, opening.target)}.`
+            : "Off: every window opens on the two above, whatever you last translated."
+        }
+      >
+        <Toggle
+          label="Remember the last pair"
+          on={settings.rememberLastLang}
+          onChange={(v) =>
+            void save({
+              ...settings,
+              rememberLastLang: v,
+              // Turning it off means going back to the defaults, so the pair
+              // that was being remembered goes with it rather than lying in
+              // wait to reappear the day the switch is turned back on.
+              ...(v ? {} : { lastSourceLang: "", lastTargetLang: "" }),
+            })
+          }
+        />
       </Row>
     </Section>
   );

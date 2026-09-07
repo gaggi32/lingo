@@ -31,6 +31,11 @@ browser engine — it uses the one your OS already has.
 - **Knows every language Google does.** The picker is filled from Google's own
   list, fetched with your key, so a language added next year shows up without a
   new release. A bundled list stands in until that answer arrives.
+- **Picks a language without the mouse.** Type to filter, arrows to walk the
+  list, <kbd>Enter</kbd> to take the row you are on.
+- **Opens where you left off.** Switch languages in the pop-up and it stays
+  switched. Turn that off under **Settings → Translation** and every card comes
+  back on the pair you set as the default.
 - **Swaps and carries over.** The swap button flips the pair *and* moves the
   translation into the input — which is what you want when you are going back
   and forth with someone.
@@ -109,6 +114,7 @@ Windows and macOS builds are unsigned, so both will warn on first launch —
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> | Summon or dismiss the card |
 | <kbd>Enter</kbd> | Copy the translation and close (or translate, if there isn't one yet) |
 | <kbd>Shift</kbd>+<kbd>Enter</kbd> | New line |
+| <kbd>↑</kbd> <kbd>↓</kbd> | Walk the language picker while it is open |
 | <kbd>Esc</kbd> | Close the open picker, then the card |
 
 The tray icon holds the same actions: left-click summons the card, right-click

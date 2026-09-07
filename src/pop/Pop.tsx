@@ -21,10 +21,16 @@ import {
   getSettings,
   hidePop,
   openDesk,
+  saveSettings,
   translate,
 } from "../lib/api";
-import { onPopShow, onSettingsChanged } from "../lib/events";
+import {
+  notifySettingsChanged,
+  onPopShow,
+  onSettingsChanged,
+} from "../lib/events";
 import { nameOf, resolve } from "../lib/languages";
+import { startPair, withLastPair } from "../lib/pair";
 import { useKeyStatus } from "../lib/useKeyStatus";
 import { useLanguages } from "../lib/useLanguages";
 import { record } from "../lib/history";
@@ -88,9 +94,10 @@ export default function Pop() {
   const loadSettings = useCallback(async () => {
     try {
       const s = await getSettings();
+      const pair = startPair(s);
       setSettings(s);
-      setSource(s.sourceLang);
-      setTarget(s.targetLang);
+      setSource(pair.source);
+      setTarget(pair.target);
       return s;
     } catch (err) {
       setError(errorText(err));
@@ -101,6 +108,31 @@ export default function Pop() {
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  /**
+   * Record the pair the user has just moved to, so the next summon opens on it.
+   *
+   * Only when Lingo is set to remember: with that off the card is meant to come
+   * back on the defaults, and a pick here belongs to this card alone. Failing
+   * to write costs nothing but the convenience, so it is logged and dropped.
+   */
+  const remember = useCallback(
+    async (nextSource: string, nextTarget: string) => {
+      if (!settings) return;
+      const next = withLastPair(settings, {
+        source: nextSource,
+        target: nextTarget,
+      });
+      if (!next) return;
+      try {
+        setSettings(await saveSettings(next));
+        await notifySettingsChanged();
+      } catch (err) {
+        console.error("Could not remember the language pair:", err);
+      }
+    },
+    [settings],
+  );
 
   // Settings saved in the desk window should take effect here without a restart.
   useEffect(() => {
@@ -263,7 +295,8 @@ export default function Pop() {
         // A seeded card should already be showing the answer by the time the
         // user has finished reading it, so skip the debounce.
         if (seed?.trim() && s && !needsKey) {
-          void run(seed, s.sourceLang, s.targetLang);
+          const pair = startPair(s);
+          void run(seed, pair.source, pair.target);
         }
       })();
     });
@@ -323,15 +356,18 @@ export default function Pop() {
 
   const swap = useCallback(() => {
     if (!swappable) return;
-    setSource(target);
-    setTarget(resolve(languages, source || detected));
+    const nextSource = target;
+    const nextTarget = resolve(languages, source || detected);
+    setSource(nextSource);
+    setTarget(nextTarget);
+    void remember(nextSource, nextTarget);
     if (result) {
       setInput(result.text);
       setResult(null);
     }
     setPicker(null);
     focusInput();
-  }, [languages, source, target, detected, result, swappable]);
+  }, [languages, source, target, detected, result, swappable, remember]);
 
   const expand = useCallback(async () => {
     await openDesk();
@@ -448,8 +484,11 @@ export default function Pop() {
                 value={picker === "source" ? source : target}
                 allowAuto={picker === "source"}
                 onPick={(code) => {
-                  if (picker === "source") setSource(code);
-                  else setTarget(code);
+                  const nextSource = picker === "source" ? code : source;
+                  const nextTarget = picker === "target" ? code : target;
+                  setSource(nextSource);
+                  setTarget(nextTarget);
+                  void remember(nextSource, nextTarget);
                   setPicker(null);
                   focusInput();
                 }}

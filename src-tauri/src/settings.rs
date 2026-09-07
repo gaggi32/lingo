@@ -52,6 +52,18 @@ pub struct Settings {
     pub save_history: bool,
     /// Translate as the user types, instead of waiting for Enter.
     pub live_translate: bool,
+    /// Open with the pair last used rather than with the defaults above.
+    pub remember_last_lang: bool,
+    /// The source last picked in a window. Empty is a real value here —
+    /// "let Google detect it" — so it is [`last_target_lang`] that says
+    /// whether anything has been recorded at all.
+    ///
+    /// [`last_target_lang`]: Settings::last_target_lang
+    pub last_source_lang: String,
+    /// The target last picked in a window, or empty for "nothing yet". A
+    /// target is never legitimately empty, which is what makes it the field
+    /// worth asking; the two are always written together.
+    pub last_target_lang: String,
 }
 
 impl Default for Settings {
@@ -64,6 +76,9 @@ impl Default for Settings {
             auto_copy: false,
             save_history: true,
             live_translate: true,
+            remember_last_lang: true,
+            last_source_lang: String::new(),
+            last_target_lang: String::new(),
         }
     }
 }
@@ -148,6 +163,11 @@ pub fn load(app: &AppHandle) -> Stored {
     if stored.prefs.target_lang.is_empty() {
         stored.prefs.target_lang = DEFAULT_TARGET.into();
     }
+    // The remembered pair gets the same treatment, minus the fallback: an
+    // empty target here means "nothing recorded", and filling it in with the
+    // default would claim a pair the user never picked.
+    stored.prefs.last_source_lang = normalise_lang(&stored.prefs.last_source_lang);
+    stored.prefs.last_target_lang = normalise_lang(&stored.prefs.last_target_lang);
     stored
 }
 
@@ -231,6 +251,18 @@ mod tests {
         assert!(stored.prefs.auto_copy);
         // Nothing carried a key, so there is none.
         assert_eq!(stored.api_key, "");
+        // Fields added since take their defaults rather than failing the read.
+        assert!(stored.prefs.remember_last_lang);
+        assert_eq!(stored.prefs.last_target_lang, "");
+    }
+
+    #[test]
+    fn no_pair_has_been_remembered_until_one_is_written() {
+        // Empty source is a real choice, so "nothing recorded yet" has to be
+        // readable off the target — which is never legitimately empty.
+        let prefs = Settings::default();
+        assert_eq!(prefs.last_source_lang, "");
+        assert_eq!(prefs.last_target_lang, "");
     }
 
     #[test]
@@ -239,6 +271,8 @@ mod tests {
         assert!(json.contains("apiKey"), "{json}");
         assert!(json.contains("targetLang"), "{json}");
         assert!(json.contains("liveTranslate"), "{json}");
+        assert!(json.contains("rememberLastLang"), "{json}");
+        assert!(json.contains("lastTargetLang"), "{json}");
         // And nothing from either previous back end lingers.
         assert!(!json.contains("formality"), "{json}");
         assert!(!json.contains("machineTranslation"), "{json}");

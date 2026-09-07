@@ -17,6 +17,12 @@ export interface Settings {
   autoCopy: boolean;
   saveHistory: boolean;
   liveTranslate: boolean;
+  /** Open with {@link lastSourceLang}/{@link lastTargetLang} instead of the defaults above. */
+  rememberLastLang: boolean;
+  /** Source last picked in a window; "" is a real value ("Detect"). */
+  lastSourceLang: string;
+  /** Target last picked in a window, or "" when nothing has been recorded. */
+  lastTargetLang: string;
 }
 
 /** Everything the UI is told about the saved API key. */

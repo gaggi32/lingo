@@ -11,6 +11,7 @@ import {
 } from "../components/icons";
 import { errorText, maxCharacters, translate } from "../lib/api";
 import { nameOf, resolve } from "../lib/languages";
+import { startPair, withLastPair, type Pair } from "../lib/pair";
 import { useKeyStatus } from "../lib/useKeyStatus";
 import { useLanguages } from "../lib/useLanguages";
 import { record } from "../lib/history";
@@ -44,8 +45,11 @@ export default function Workbench({
   const languages = useLanguages();
   const keyStatus = useKeyStatus();
 
-  const [source, setSource] = useState(settings.sourceLang);
-  const [target, setTarget] = useState(settings.targetLang);
+  /** What a freshly opened window shows — the defaults, or the pair last used. */
+  const opening = startPair(settings);
+
+  const [source, setSource] = useState(opening.source);
+  const [target, setTarget] = useState(opening.target);
   const [input, setInput] = useState("");
   const [result, setResult] = useState<Translation | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,11 +72,12 @@ export default function Workbench({
       });
   }, []);
 
-  // Keep the pair in step when Settings (or the pop-up) changes the defaults.
+  // Keep the pair in step when Settings — or the pop-up — changes what a
+  // window opens with.
   useEffect(() => {
-    setSource(settings.sourceLang);
-    setTarget(settings.targetLang);
-  }, [settings.sourceLang, settings.targetLang]);
+    setSource(opening.source);
+    setTarget(opening.target);
+  }, [opening.source, opening.target]);
 
   // Reopening a history row loads its exact pair as well as its text, so
   // re-running it gives the same answer.
@@ -155,16 +160,29 @@ export default function Workbench({
 
   const detected = result?.detectedSourceLanguage ?? "";
 
+  /**
+   * Move the working pair.
+   *
+   * This is not a change of *default* — the defaults are edited in Settings.
+   * It is recorded as the pair last used, which is what the next window opens
+   * with while "Remember the last pair" is on. With that off nothing is
+   * written, and every window keeps opening on the defaults.
+   */
+  const movePair = (next: Pair) => {
+    setSource(next.source);
+    setTarget(next.target);
+    const changed = withLastPair(settings, next);
+    if (changed) void save(changed);
+  };
+
   const pickSource = (code: string) => {
-    setSource(code);
     setPicker(null);
-    void save({ ...settings, sourceLang: code });
+    movePair({ source: code, target });
   };
 
   const pickTarget = (code: string) => {
-    setTarget(code);
     setPicker(null);
-    void save({ ...settings, targetLang: code });
+    movePair({ source, target: code });
   };
 
   /**
@@ -176,15 +194,14 @@ export default function Workbench({
 
   const swap = () => {
     if (!swappable) return;
-    const nextSource = target;
-    const nextTarget = resolve(languages, source || detected);
-    setSource(nextSource);
-    setTarget(nextTarget);
+    movePair({
+      source: target,
+      target: resolve(languages, source || detected),
+    });
     if (result) {
       setInput(result.text);
       setResult(null);
     }
-    void save({ ...settings, sourceLang: nextSource, targetLang: nextTarget });
   };
 
   const copy = async (text: string) => {
