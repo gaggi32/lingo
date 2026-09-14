@@ -27,6 +27,10 @@ import {
 import { acceleratorToKeys, eventToChord } from "../lib/shortcut";
 import { nameOf } from "../lib/languages";
 import { startPair, withDefaultPair } from "../lib/pair";
+import {
+  getStayOnTopFullscreen,
+  setStayOnTopFullscreen,
+} from "../lib/topmost";
 import { useKeyStatus } from "../lib/useKeyStatus";
 import { useLanguages } from "../lib/useLanguages";
 import type { Settings } from "../lib/types";
@@ -480,6 +484,17 @@ function TranslationSection({ settings, save }: Props) {
 // ---- Pop-up behaviour -------------------------------------------------------
 
 function PopupSection({ settings, save }: Props) {
+  const [stayOnTop, setStayOnTop] = useState(getStayOnTopFullscreen);
+
+  const toggleStayOnTop = async (next: boolean) => {
+    try {
+      await setStayOnTopFullscreen(next);
+      setStayOnTop(next);
+    } catch (err) {
+      console.error("stay-on-top toggle failed:", err);
+    }
+  };
+
   return (
     <Section title="Pop-up">
       <Row
@@ -530,6 +545,17 @@ function PopupSection({ settings, save }: Props) {
           label="Keep a history"
           on={settings.saveHistory}
           onChange={(v) => void save({ ...settings, saveHistory: v })}
+        />
+      </Row>
+
+      <Row
+        label="Stay on top of fullscreen apps"
+        description="Keeps the pop-up visible above games and fullscreen video, even when they try to reclaim focus."
+      >
+        <Toggle
+          label="Stay on top of fullscreen apps"
+          on={stayOnTop}
+          onChange={(v) => void toggleStayOnTop(v)}
         />
       </Row>
     </Section>

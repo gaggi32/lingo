@@ -6,6 +6,7 @@ import UsageMeter from "./UsageMeter";
 import { errorText, getSettings, saveSettings } from "../lib/api";
 import { notifySettingsChanged } from "../lib/events";
 import { acceleratorToKeys } from "../lib/shortcut";
+import { applySavedStayOnTopFullscreen } from "../lib/topmost";
 import {
   ClockIcon,
   LanguagesIcon,
@@ -30,6 +31,11 @@ export default function App() {
 
   useEffect(() => {
     getSettings().then(setSettings).catch((e) => setLoadError(errorText(e)));
+  }, []);
+
+  // Re-apply the fullscreen-topmost watchdog, if enabled, once on launch.
+  useEffect(() => {
+    void applySavedStayOnTopFullscreen();
   }, []);
 
   /**

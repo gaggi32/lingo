@@ -11,7 +11,10 @@ mod settings;
 mod usage;
 
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{
@@ -28,6 +31,9 @@ use settings::{Settings, Stored};
 
 const POP_LABEL: &str = "pop";
 const MAIN_LABEL: &str = "main";
+
+/// Shared flag for the fullscreen-topmost watchdog (see [`spawn_topmost_watch`]).
+struct TopmostWatch(Arc<AtomicBool>);
 
 /// Passed to ourselves by the autostart entry so a login launch stays in the
 /// tray instead of throwing the desk window at the user.
@@ -401,6 +407,36 @@ fn resume_shortcut(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<
     register_hotkey(&app, &state.snapshot().hotkey)
 }
 
+/// Toggle the fullscreen-topmost watchdog. `alwaysOnTop` in tauri.conf.json
+/// asserts HWND_TOPMOST once, but a fullscreen game or video regularly steals
+/// it back when it (re)gains focus, and Windows treats a maximized borderless
+/// app as fullscreen the same way. Re-asserting on an interval — the same
+/// trick overlay apps like Discord's use — makes the pop-up come back on top
+/// within a beat instead of staying buried until the other app loses focus.
+#[tauri::command]
+fn set_topmost_watch(app: AppHandle, enabled: bool) -> Result<(), String> {
+    app.state::<TopmostWatch>().0.store(enabled, Ordering::Relaxed);
+    if enabled {
+        if let Some(win) = app.get_webview_window(POP_LABEL) {
+            win.set_always_on_top(true).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Background loop backing [`set_topmost_watch`]. Sleeps between checks so it
+/// costs nothing while the setting is off.
+fn spawn_topmost_watch(app: AppHandle, flag: Arc<AtomicBool>) {
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_millis(750));
+        if flag.load(Ordering::Relaxed) {
+            if let Some(win) = app.get_webview_window(POP_LABEL) {
+                let _ = win.set_always_on_top(true);
+            }
+        }
+    });
+}
+
 // ---- Tray -------------------------------------------------------------------
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -491,6 +527,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![AUTOSTART_FLAG]),
         ))
+        .manage(TopmostWatch(Arc::new(AtomicBool::new(false))))
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,
@@ -507,6 +544,7 @@ pub fn run() {
             db_url,
             suspend_shortcut,
             resume_shortcut,
+            set_topmost_watch,
         ])
         .on_window_event(|window, event| match event {
             // Clicking away dismisses the card, the way a launcher should.
@@ -564,6 +602,9 @@ pub fn run() {
             }
 
             build_tray(&handle)?;
+
+            let watch_flag = app.state::<TopmostWatch>().0.clone();
+            spawn_topmost_watch(handle.clone(), watch_flag);
 
             // Re-point an existing login entry at THIS executable, healing a
             // stale path left behind by a dev build.
