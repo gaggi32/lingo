@@ -1,218 +1,185 @@
 # Lingo
 
-A pop-up translator for Windows, macOS and Linux, powered by the
-[Google Cloud Translation API](https://cloud.google.com/translate).
+A pop-up translator for Windows and macOS. Copy some text, press
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> (<kbd>⌘</kbd>+<kbd>⇧</kbd>+<kbd>L</kbd>
+on a Mac), and a small card appears with it already translated. Press
+<kbd>Enter</kbd> to copy the translation and the card is gone. Click anywhere
+else and it is gone too. The rest of the time Lingo waits in the tray.
 
-Press one shortcut and a small card unrolls near the top of the screen with
-whatever you last copied — already translated. Read it, press <kbd>Enter</kbd>
-to copy it back, and it disappears. Click anywhere else and it disappears too.
-Lingo otherwise waits in the tray and stays out of the way.
+Lingo translates with the [Google Cloud Translation API](https://cloud.google.com/translate)
+using **your own Google Cloud key**, so your text goes to your own Google
+project and nowhere else. The first 500,000 characters each month are free,
+and Lingo is set up so that, out of the box, it cannot spend more than that.
 
-You bring your own Google Cloud API key, which means the text goes to *your*
-project: Google states that Cloud Translation does not use your content to train
-its models, and the first 500,000 characters each month cost nothing. Built with
-Tauri v2, React and TypeScript. Roughly 12 MB installed, and it does not ship a
-browser engine — it uses the one your OS already has.
+## Download
 
----
+Get the newest version from the
+[releases page](https://github.com/gaggi32/lingo/releases/latest):
 
-## What it does
+| Your computer | File |
+| --- | --- |
+| Windows 10 or 11 | `Lingo-<version>-x64-setup.exe` |
+| Mac with Apple silicon (M1 and later) | `Lingo-<version>-arm64.dmg` |
+| Mac with an Intel chip | `Lingo-<version>-x64.dmg` |
 
-- **One hotkey, from anywhere.** <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>
-  (<kbd>⌘</kbd>+<kbd>⇧</kbd>+<kbd>L</kbd> on macOS), rebindable to anything the
-  OS will give you.
-- **Starts from your clipboard.** Copy a sentence, hit the hotkey, and the
-  translation is already on screen. No paste step.
-- **Translates as you type**, debounced so it is not one request per keystroke.
-- **Detects the source language**, or pin it if you know better.
-- **Keeps the shape of what you paste.** Google does not reliably preserve line
-  breaks, so Lingo sends one line per string and puts the pieces back where they
-  were — a three-paragraph email comes back as three paragraphs.
-- **Knows every language Google does.** The picker is filled from Google's own
-  list, fetched with your key, so a language added next year shows up without a
-  new release. A bundled list stands in until that answer arrives.
-- **Picks a language without the mouse.** Type to filter, arrows to walk the
-  list, <kbd>Enter</kbd> to take the row you are on.
-- **Opens where you left off.** Switch languages in the pop-up and it stays
-  switched. Turn that off under **Settings → Translation** and every card comes
-  back on the pair you set as the default.
-- **Swaps and carries over.** The swap button flips the pair *and* moves the
-  translation into the input — which is what you want when you are going back
-  and forth with someone.
-- **Grows to fit.** The window is sized to its content, so a two-word answer
-  gets a two-word card.
-- **Remembers what mattered.** Anything you copy is saved to a local history you
-  can search and pin. Typing that you never used is not.
-- **Counts what it spends,** so the free half-million characters do not run out
-  without warning, and so an overrun shows up as a number rather than as a
-  surprise on a bill.
-- **Never hands your key to the UI.** It is written once and lives in Rust
-  after that. No part of the app that draws the screen can read it back.
+Each file has a `.sha256` next to it if you want to check your download
+(`Get-FileHash .\Lingo-…-setup.exe` on Windows, `shasum -a 256 Lingo-….dmg`
+on a Mac).
 
-## Requirements
+**The first time you open it.** Lingo is free and not signed with a paid
+Microsoft or Apple certificate, so each system asks once:
 
-A Google Cloud API key with the Cloud Translation API enabled. It takes about
-two minutes:
+- **Windows:** "Windows protected your PC" → **More info** → **Run anyway**.
+- **macOS:** open Lingo once (it will be blocked), then go to
+  **System Settings → Privacy & Security**, scroll down and click
+  **Open Anyway**. macOS may also ask whether Lingo may use its item in your
+  Keychain (that is where your key is stored): choose **Always Allow**. After an
+  update it can ask once more.
 
-1. Create or pick a project in the
-   [Google Cloud console](https://console.cloud.google.com).
-2. Enable the
+Linux: there are no ready-made Linux builds. You can build it yourself (see
+the end of this page); that is untested.
+
+## Get a Google Cloud API key (about 5 minutes)
+
+Lingo needs a key from a Google Cloud project with the Cloud Translation API
+switched on. The same steps are in Lingo under **Settings → Google Cloud →
+How to get a key**, with a link for each.
+
+1. **Create a project**, or pick one you already have, in the
+   [Google Cloud console](https://console.cloud.google.com/projectcreate).
+2. **Set up billing** on it under [Billing](https://console.cloud.google.com/billing).
+   Google asks for a card even if you only ever use the free tier. New
+   accounts start with a free trial credit.
+3. **Enable the Cloud Translation API** on that project:
    [Cloud Translation API](https://console.cloud.google.com/apis/library/translate.googleapis.com)
-   on it. Billing has to be set up on the project even while you are inside the
-   free tier.
-3. Make a key under
-   [APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials).
-4. Paste it into **Settings → Google Cloud** and press **Save & check**.
+   → **Enable**.
+4. **Create an API key**: [Credentials](https://console.cloud.google.com/apis/credentials)
+   → **Create credentials** → **API key**.
+5. **Restrict the key**: click the key you just made, under
+   **API restrictions** choose **Restrict key**, tick only
+   **Cloud Translation API**, and **Save**. A restricted key that leaks cannot
+   be used for any other Google service.
+6. **Cap it at Google** (see the next section): on the API's
+   [Quotas page](https://console.cloud.google.com/apis/api/translate.googleapis.com/quotas),
+   find **Characters sent to general model per project per day**, edit it and
+   set it to **16,000**. That is roughly the free 500,000 a month.
+7. Optional: add a [budget alert](https://console.cloud.google.com/billing/budgets)
+   so Google emails you if anything is ever billed.
+8. In Lingo, open **Settings → Google Cloud**, paste the key and press
+   **Save & check**. The check is free: it asks Google for its language list,
+   which is not billed. If something is wrong, it tells you which of the usual
+   problems you have: key rejected, API not enabled, or billing not set up.
 
-The check costs nothing — it asks Google for its language list, which is not
-billed — and it tells you which of the three usual problems you have if the key
-does not work: rejected key, API not enabled, or billing not set up.
+**Treat the key like a password.** Don't paste it into chats, screenshots,
+emails or code. If it ever gets out, delete it under
+[Credentials](https://console.cloud.google.com/apis/credentials) and create a
+new one; the old one stops working at once.
 
-**Restrict the key.** In the console, limit it to the Cloud Translation API and
-set a quota. Lingo stores it in plain text in its own config folder, the same as
-your other preferences, and a restricted key that leaks cannot be spent on
-anything else.
+## Keep your bill at zero
 
-### What it costs
+Google charges for the characters you send:
 
 | | |
 | --- | --- |
-| First 500,000 characters a month | Free |
+| First 500,000 characters a month | Free (a $10 monthly credit, shared between Translation Basic and Advanced) |
 | After that | $20 per million characters |
 
-Google counts the characters you send, including spaces, and counts them again
-each time — a sentence translated into two languages is billed twice. Lingo's
-sidebar meter tracks its own running total against the free tier. It is a guide,
-not an audit: anything else on the same project spends the same allowance, and
-Google's own figure lives in Cloud Billing.
+Every character counts, spaces included, and text translated twice is counted
+twice. Prices as of November 2026; Google's
+[pricing page](https://cloud.google.com/translate/pricing) has the current
+figures.
 
-**Upgrading from an earlier build?** Your settings and your history carry over.
-Dead fields from the DeepL and MyMemory eras are ignored on the way in and
-dropped on the next save, and language codes are rewritten into Google's
-spelling — `EN-GB` and `en-GB` both become `en`, `pt-BR` becomes `pt`, while
-`zh-CN` and `zh-TW` keep their regions because Google keeps them too.
+Four things stand between a mistake and a bill:
 
-## Install
+1. **The key is restricted** to the Cloud Translation API (step 5), so a
+   leaked key cannot run up charges on other services.
+2. **Google's daily quota** (step 6) is the real hard stop. It is unlimited
+   until you set it. Once set, Google refuses everything past it, whatever uses
+   the key, including a key that leaked. Changes can take up to a day to apply,
+   and the daily count resets at midnight Pacific time.
+3. **Lingo's monthly limit** (**Settings → Spending limit**, 500,000 characters
+   by default) is a second guard. Lingo counts what it sends and refuses a
+   translation *before* sending it if it would go past the limit, so a refused
+   translation costs nothing. You can raise it; the screen shows what each step
+   could cost. It only counts Lingo, not anything else on the same project,
+   and it is Lingo's own count, not Google's invoice.
+4. **A budget alert** (step 7) emails you. It does not stop anything.
 
-Grab the installer for your platform from the
-[releases page](https://github.com/gaggi32/lingo/releases), or build it
-yourself — see below.
-
-| Platform | Artifact |
-| --- | --- |
-| Windows | `Lingo_<version>_x64-setup.exe` (NSIS) or `Lingo_<version>_x64_en-US.msi` |
-| macOS | `Lingo_<version>_universal.dmg` |
-| Linux | `lingo_<version>_amd64.deb`, `lingo_<version>_amd64.AppImage` |
-
-Windows and macOS builds are unsigned, so both will warn on first launch —
-"More info → Run anyway" on Windows, right-click → Open on macOS.
+Two more settings help: **Translate as you type** (Settings → Pop-up) sends a
+request while you type; turn it off and nothing is sent until you press
+<kbd>Enter</kbd>. And copied text longer than 1,000 characters never starts a
+translation on its own.
 
 ## Using it
 
 | Key | In the pop-up |
 | --- | --- |
-| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> | Summon or dismiss the card |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> | Open or close the card (change it in Settings) |
 | <kbd>Enter</kbd> | Copy the translation and close (or translate, if there isn't one yet) |
 | <kbd>Shift</kbd>+<kbd>Enter</kbd> | New line |
-| <kbd>↑</kbd> <kbd>↓</kbd> | Walk the language picker while it is open |
-| <kbd>Esc</kbd> | Close the open picker, then the card |
+| <kbd>Tab</kbd> | Swap the two languages, and move the translation into the input |
+| <kbd>Ctrl</kbd>+<kbd>1</kbd> / <kbd>Ctrl</kbd>+<kbd>2</kbd> | Open the "from" / "into" language list (<kbd>Control</kbd> on a Mac) |
+| <kbd>↑</kbd> <kbd>↓</kbd>, typing | Move through and filter an open language list |
+| <kbd>Esc</kbd> | Close the open list, then the card |
 
-The tray icon holds the same actions: left-click summons the card, right-click
-opens a menu with **Translate clipboard**, **Open Lingo** and **Quit**. Closing
-the main window parks Lingo in the tray rather than quitting, so the hotkey
-keeps working.
+- **Tray icon:** left-click opens the card; right-click has **Translate
+  clipboard**, **Open Lingo** and **Quit**. Closing the main window keeps Lingo
+  in the tray so the hotkey keeps working.
+- **Main window:** a larger translator (<kbd>Ctrl</kbd>+<kbd>Enter</kbd>
+  translates), a searchable history you can pin entries in, this month's
+  usage, and Settings.
+- **Settings** also has: the default languages and whether the card opens on
+  the pair you used last, keep the text when the card reopens, copy
+  automatically, keep a history, stay on top of fullscreen apps, start with
+  the computer, and update checks.
 
-In the main window, <kbd>Ctrl</kbd>+<kbd>Enter</kbd> translates and records the
-result to History.
+## Your data and privacy
 
-**Watching the spend.** *Translate as you type* is the setting that costs money
-fastest. Turn it off under **Settings → Pop-up** and nothing is sent — or
-billed — until you press Enter.
+- **The text you translate** goes to Google, through your own project, and
+  nowhere else. Google states that Cloud Translation does not use your content
+  to train its models. Lingo has no account, no server and no telemetry.
+- **Your key** is kept in Windows Credential Manager or the macOS Keychain.
+  The part of Lingo that draws the screen can never read it back; it only
+  learns whether a key is saved and its last four characters. Lingo sends it
+  to Google's translation endpoint and nowhere else. (Upgrading from 0.1.x,
+  which kept it in `settings.json`: it is moved over on the first start.)
+- **Update check:** once a day Lingo asks GitHub for the version number of its
+  newest release. No text and no key go with it, and you can turn it off in
+  Settings. Installing an update is always your own download.
+- **Links** in the app open in your browser, and only for Google Cloud and
+  GitHub pages. The app loads no web pages of its own.
+- **On your computer:** `settings.json` (preferences) and `usage.json` (this
+  month's count) in the config folder, and `lingo.db` (history) in the data
+  folder. On Windows both are `%APPDATA%\com.lingo.translate`, on macOS
+  `~/Library/Application Support/com.lingo.translate`. They are not encrypted;
+  turn off **Keep a history** if you don't want translations stored.
 
-## Where your data lives
+## Uninstall
 
-| What | Where |
-| --- | --- |
-| Preferences and your API key | `settings.json` in the app config dir |
-| This month's usage tally | `usage.json`, beside it |
-| Translation history | `lingo.db` (SQLite) in the app data dir |
+First remove your key: **Settings → Google Cloud → Remove it** (that deletes
+it from Credential Manager / the Keychain). Then:
 
-That is `%APPDATA%\com.lingo.translate` on Windows,
-`~/Library/Application Support/com.lingo.translate` on macOS, and
-`~/.config/com.lingo.translate` on Linux.
+- **Windows:** Settings → Apps → Installed apps → Lingo → Uninstall.
+- **macOS:** quit Lingo from the menu bar and move it from Applications to the
+  Trash.
 
-None of them is encrypted. They sit in your user profile, readable by anything
-running as you — which is why restricting the key in the Cloud console is the
-defence that actually matters.
-
-Text you translate goes to Google and nowhere else. Lingo has no telemetry, no
-accounts and no server of its own.
+To remove your settings and history too, delete the `com.lingo.translate`
+folder listed above.
 
 ## Building from source
 
-You will need [Node](https://nodejs.org) 20+, [Rust](https://rustup.rs), and
-your platform's Tauri prerequisites
-([the list is here](https://v2.tauri.app/start/prerequisites/)).
+You need [Node](https://nodejs.org) 20+, [Rust](https://rustup.rs) and your
+platform's [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```bash
 npm install
 npm run tauri:dev      # run it
-npm run tauri:build    # installers land in src-tauri/target/release/bundle/
-cargo test --manifest-path src-tauri/Cargo.toml --lib
+npm test               # Vitest
+cargo test --manifest-path src-tauri/Cargo.toml
+npm run tauri:build    # installer in src-tauri/target/release/bundle/
 ```
 
-**On Windows**, use `run-dev.cmd` and `run-build.cmd` instead. Rust links
-through MSVC, and if the newest Visual Studio install is missing the "Desktop
-development with C++" workload the build fails with a bare
-`LNK1104: cannot open file "msvcrt.lib"`. Those two scripts ask `vswhere` for an
-install that actually has the C++ x64 tools, load its environment, and then run
-the same npm scripts.
-
-The app icon is generated rather than checked in as a binary blob you cannot
-edit:
-
-```bash
-node scripts/make-icon.mjs     # draws app-icon.png from signed distance fields
-npx tauri icon app-icon.png    # fans it out into src-tauri/icons/
-```
-
-`tauri icon` also writes `icons/android/` and `icons/ios/`; Lingo is
-desktop-only, so those two folders get deleted again.
-
-## How it fits together
-
-```
-src/
-  pop/Pop.tsx           the hotkey card: one file, the whole interaction
-  full/                 the desk window — Workbench, History, Settings
-  lib/api.ts            every call into Rust, in one place
-  lib/languages.ts      the bundled language table and its helpers
-  lib/useLanguages.ts   Google's live list, with the bundled one as fallback
-  lib/useKeyStatus.ts   whether a key is saved — all the UI may know about it
-  lib/history.ts        the SQLite log
-src-tauri/src/
-  lib.rs                windows, tray, global shortcut, IPC commands
-  google.rs             the Cloud Translation client
-  settings.rs           the persisted settings file, and the key beside it
-  usage.rs              the monthly character tally
-```
-
-Two windows share one process and one bundle: `pop.html` for the card and
-`index.html` for the desk window. They share no memory, so each broadcasts a
-Tauri event after a write and re-reads on receipt.
-
-**Every Google call happens in Rust**, and so does the key. `Settings` — the
-struct that crosses into a webview — has no field for the key at all, which
-means the UI cannot read it back and a stale settings object cannot blank it on
-a round trip. The key is written once through `set_api_key`, and after that a
-translation names a language pair and some text while Rust supplies the
-credential.
-
-`google.rs` also absorbs the two habits of the v2 API that would otherwise reach
-the screen: replies come back HTML-escaped even when you ask for plain text
-(`&#39;` where an apostrophe belongs), and line breaks are not reliably
-preserved, so text is sent one line per string and reassembled on the way out.
-
-## Licence
-
-MIT.
+On Windows, if the build stops with `LNK1104: cannot open file "msvcrt.lib"`,
+use `run-dev.cmd` / `run-build.cmd`: they load a Visual Studio install that has
+the C++ x64 tools. [CLAUDE.md](CLAUDE.md) has the layout, the conventions and
+how a release is made.
