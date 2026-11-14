@@ -18,6 +18,11 @@
 
 use tauri::AppHandle;
 
+/// The credential's service name: the app identifier ("com.lingo.translate").
+fn service(app: &AppHandle) -> String {
+    app.config().identifier.clone()
+}
+
 use crate::settings::{self, Stored};
 
 /// True where the key is kept in `settings.json` rather than a credential store.
@@ -49,30 +54,31 @@ pub fn plan(store: Result<Option<&str>, ()>, file_key: &str) -> Plan {
 
 #[cfg(any(windows, target_os = "macos"))]
 mod store {
-    const SERVICE: &str = "com.lingo.translate";
     const ACCOUNT: &str = "google-cloud";
 
-    fn entry() -> Result<keyring::Entry, String> {
-        keyring::Entry::new(SERVICE, ACCOUNT).map_err(|e| e.to_string())
+    /// `service` is the app identifier, so a dev build run under another
+    /// identifier never sees, spends or overwrites the real key.
+    fn entry(service: &str) -> Result<keyring::Entry, String> {
+        keyring::Entry::new(service, ACCOUNT).map_err(|e| e.to_string())
     }
 
     /// `Ok(None)` when nothing is stored; `Err` when the store itself failed.
-    pub fn get() -> Result<Option<String>, String> {
-        match entry()?.get_password() {
+    pub fn get(service: &str) -> Result<Option<String>, String> {
+        match entry(service)?.get_password() {
             Ok(k) => Ok(Some(k).filter(|k| !k.is_empty())),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(e.to_string()),
         }
     }
 
-    pub fn set(key: &str) -> Result<(), String> {
-        entry()?
+    pub fn set(service: &str, key: &str) -> Result<(), String> {
+        entry(service)?
             .set_password(key)
             .map_err(|e| format!("Could not store the key in the system's credential store: {e}"))
     }
 
-    pub fn delete() -> Result<(), String> {
-        match entry()?.delete_credential() {
+    pub fn delete(service: &str) -> Result<(), String> {
+        match entry(service)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(e.to_string()),
         }
@@ -82,13 +88,13 @@ mod store {
 #[cfg(not(any(windows, target_os = "macos")))]
 mod store {
     // Linux: the key is part of settings.json, so there is no separate store.
-    pub fn get() -> Result<Option<String>, String> {
+    pub fn get(_service: &str) -> Result<Option<String>, String> {
         Ok(None)
     }
-    pub fn set(_key: &str) -> Result<(), String> {
+    pub fn set(_service: &str, _key: &str) -> Result<(), String> {
         Ok(())
     }
-    pub fn delete() -> Result<(), String> {
+    pub fn delete(_service: &str) -> Result<(), String> {
         Ok(())
     }
 }
@@ -102,7 +108,8 @@ pub fn load(app: &AppHandle, stored: &Stored) -> String {
         return file_key;
     }
 
-    let from_store = store::get();
+    let service = service(app);
+    let from_store = store::get(&service);
     if let Err(e) = &from_store {
         eprintln!("credential store not readable ({e}); using settings.json for now");
     }
@@ -116,7 +123,9 @@ pub fn load(app: &AppHandle, stored: &Stored) -> String {
             from_store.ok().flatten().unwrap_or_default()
         }
         Plan::MoveFromFile => {
-            if store::set(&file_key).is_ok() && store::get().ok().flatten().as_deref() == Some(&file_key) {
+            let moved = store::set(&service, &file_key).is_ok()
+                && store::get(&service).ok().flatten().as_deref() == Some(file_key.as_str());
+            if moved {
                 scrub(app, stored);
             }
             file_key
@@ -138,13 +147,13 @@ fn scrub(app: &AppHandle, stored: &Stored) {
 }
 
 /// Save a new key where this build keeps it.
-pub fn save(key: &str) -> Result<(), String> {
-    store::set(key)
+pub fn save(app: &AppHandle, key: &str) -> Result<(), String> {
+    store::set(&service(app), key)
 }
 
 /// Forget the key.
-pub fn delete() -> Result<(), String> {
-    store::delete()
+pub fn delete(app: &AppHandle) -> Result<(), String> {
+    store::delete(&service(app))
 }
 
 /// What `settings.json` should carry for `key`: the key itself on Linux,

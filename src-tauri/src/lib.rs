@@ -284,7 +284,7 @@ fn set_api_key(
         return Err("That does not look like a Google Cloud API key.".into());
     }
 
-    secret::save(&key)?;
+    secret::save(&app, &key)?;
     if secret::IN_FILE {
         settings::save(
             &app,
@@ -301,7 +301,7 @@ fn set_api_key(
 
 #[tauri::command]
 fn clear_api_key(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<KeyStatus, String> {
-    secret::delete()?;
+    secret::delete(&app)?;
     // Also rewrites a settings.json that still carried a key from 0.1.x.
     settings::save(
         &app,
