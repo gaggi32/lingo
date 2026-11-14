@@ -516,6 +516,17 @@ function PopupSection({ settings, save }: Props) {
       </Row>
 
       <Row
+        label="Keep text when reopening"
+        description="Leaves whatever you were translating in the pop-up when you close it, so it is still there next time."
+      >
+        <Toggle
+          label="Keep text when reopening"
+          on={settings.preserveInput}
+          onChange={(v) => void save({ ...settings, preserveInput: v })}
+        />
+      </Row>
+
+      <Row
         label="Translate as you type"
         description="Off means nothing is sent to Google — and nothing is billed — until you press Enter."
       >

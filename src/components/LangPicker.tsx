@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDownIcon, SearchIcon } from "./icons";
+import { Kbd } from "./Kbd";
 import type { Language } from "../lib/types";
 
 /**
@@ -242,10 +243,19 @@ interface ButtonProps {
   open: boolean;
   onToggle: () => void;
   title?: string;
+  /** Key cap for the shortcut that also opens this picker, if there is one. */
+  shortcut?: string;
 }
 
 /** The pill that opens a picker. Shows the code, and the name when there's room. */
-export function LangButton({ label, code, open, onToggle, title }: ButtonProps) {
+export function LangButton({
+  label,
+  code,
+  open,
+  onToggle,
+  title,
+  shortcut,
+}: ButtonProps) {
   return (
     <button
       type="button"
@@ -270,6 +280,7 @@ export function LangButton({ label, code, open, onToggle, title }: ButtonProps) 
       <ChevronDownIcon
         className={`shrink-0 text-[13px] transition-transform ${open ? "rotate-180" : ""}`}
       />
+      {shortcut && <Kbd>{shortcut}</Kbd>}
     </button>
   );
 }

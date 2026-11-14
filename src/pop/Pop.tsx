@@ -6,6 +6,7 @@ import {
   LogicalSize,
   PhysicalPosition,
 } from "@tauri-apps/api/window";
+import { Kbd } from "../components/Kbd";
 import { LangButton, LangList } from "../components/LangPicker";
 import {
   AlertIcon,
@@ -288,7 +289,12 @@ export default function Pop() {
     const un = onPopShow(({ seed }) => {
       void (async () => {
         const s = await loadSettings();
-        reset(seed ?? "");
+        if (s?.preserveInput && !seed) {
+          setPicker(null);
+          setCopied(0);
+        } else {
+          reset(seed ?? "");
+        }
         setAppear((n) => n + 1);
         await place();
         focusInput();
@@ -374,17 +380,47 @@ export default function Pop() {
     await dismiss();
   }, [dismiss]);
 
+  /** Open one side's picker, or close it if it is the one already open. */
+  const togglePicker = useCallback(
+    (which: "source" | "target") => {
+      if (picker !== which) {
+        setPicker(which);
+        return;
+      }
+      setPicker(null);
+      focusInput();
+    },
+    [picker],
+  );
+
   // Escape closes an open picker first, then the window. Never quits.
+  // Tab swaps the pair; Ctrl+1 and Ctrl+2 open the source and target pickers.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      if (picker) setPicker(null);
-      else void dismiss();
+      if (e.isComposing || e.altKey || e.metaKey) return;
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (picker) setPicker(null);
+        else void dismiss();
+        return;
+      }
+
+      if (e.key === "Tab" && !e.ctrlKey && !e.shiftKey) {
+        // Even when there is nothing to swap, so focus stays where it was.
+        e.preventDefault();
+        swap();
+        return;
+      }
+
+      if (e.ctrlKey && (e.key === "1" || e.key === "2")) {
+        e.preventDefault();
+        togglePicker(e.key === "1" ? "source" : "target");
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dismiss, picker]);
+  }, [dismiss, picker, swap, togglePicker]);
 
   // Clear the copy confirmation a moment after it appears.
   useEffect(() => {
@@ -432,8 +468,9 @@ export default function Pop() {
               label={sourceLabel}
               code={source || "auto"}
               open={picker === "source"}
-              onToggle={() => setPicker((p) => (p === "source" ? null : "source"))}
-              title="Translate from"
+              onToggle={() => togglePicker("source")}
+              title="Translate from (Ctrl+1)"
+              shortcut="Ctrl+1"
             />
 
             <button
@@ -442,20 +479,22 @@ export default function Pop() {
               disabled={!swappable}
               title={
                 swappable
-                  ? "Swap languages and reuse the translation"
+                  ? "Swap languages and reuse the translation (Tab)"
                   : "Pick a source language, or translate once, before swapping"
               }
               className="ghost px-1.5 disabled:opacity-30 disabled:hover:bg-transparent"
             >
               <SwapIcon className="text-[14px]" />
+              <Kbd>Tab</Kbd>
             </button>
 
             <LangButton
               label={targetLabel}
               code={target}
               open={picker === "target"}
-              onToggle={() => setPicker((p) => (p === "target" ? null : "target"))}
-              title="Translate into"
+              onToggle={() => togglePicker("target")}
+              title="Translate into (Ctrl+2)"
+              shortcut="Ctrl+2"
             />
 
             {/* Empty stretch doubles as the window's drag region. */}

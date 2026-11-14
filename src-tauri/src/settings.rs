@@ -52,6 +52,8 @@ pub struct Settings {
     pub save_history: bool,
     /// Translate as the user types, instead of waiting for Enter.
     pub live_translate: bool,
+    /// Keep the text input when the pop-up is closed and opened again.
+    pub preserve_input: bool,
     /// Open with the pair last used rather than with the defaults above.
     pub remember_last_lang: bool,
     /// The source last picked in a window. Empty is a real value here —
@@ -76,6 +78,7 @@ impl Default for Settings {
             auto_copy: false,
             save_history: true,
             live_translate: true,
+            preserve_input: false,
             remember_last_lang: true,
             last_source_lang: String::new(),
             last_target_lang: String::new(),
@@ -271,6 +274,7 @@ mod tests {
         assert!(json.contains("apiKey"), "{json}");
         assert!(json.contains("targetLang"), "{json}");
         assert!(json.contains("liveTranslate"), "{json}");
+        assert!(json.contains("preserveInput"), "{json}");
         assert!(json.contains("rememberLastLang"), "{json}");
         assert!(json.contains("lastTargetLang"), "{json}");
         // And nothing from either previous back end lingers.
