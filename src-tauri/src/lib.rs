@@ -7,6 +7,7 @@
 //! presentation and the history queries.
 
 mod google;
+mod secret;
 mod settings;
 mod usage;
 
@@ -20,11 +21,12 @@ use serde::Serialize;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, WindowEvent,
+    AppHandle, Emitter, Manager, Url, WindowEvent,
 };
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 use settings::{Settings, Stored};
@@ -57,6 +59,19 @@ const USAGE_CHANGED: &str = "usage-changed";
 /// Told to the webviews when a key is saved or removed, so the pop-up stops
 /// asking for one the moment the desk window has been given it.
 const KEY_CHANGED: &str = "key-changed";
+
+/// Where a new version is downloaded, and where the update check asks.
+const DOWNLOAD_PAGE: &str = "https://github.com/gaggi32/lingo/releases/latest";
+const LATEST_RELEASE: &str = "https://api.github.com/repos/gaggi32/lingo/releases/latest";
+
+/// Hosts a link in the UI may open in the default browser. Everything else is
+/// refused, and the webviews themselves never navigate away from the app.
+const LINK_HOSTS: &[&str] = &[
+    "console.cloud.google.com",
+    "cloud.google.com",
+    "docs.cloud.google.com",
+    "github.com",
+];
 
 struct AppState {
     /// One client for the process: connection reuse matters when live
@@ -169,6 +184,30 @@ fn show_desk(app: &AppHandle) {
     }
 }
 
+/// The app's own pages only. In dev that is the Vite server; in a build it is
+/// Tauri's asset protocol (tauri://localhost on macOS, http(s)://tauri.localhost
+/// on Windows).
+fn is_app_url(url: &Url) -> bool {
+    match url.scheme() {
+        "tauri" => true,
+        "http" | "https" => match url.host_str() {
+            Some("tauri.localhost") => true,
+            Some("localhost") => cfg!(debug_assertions) && url.port() == Some(1430),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Whether the UI may open `url` in the browser: https, on an allowed host,
+/// with no credentials in it.
+fn allowed_link(url: &str) -> Option<Url> {
+    let parsed = Url::parse(url).ok()?;
+    let host_ok = parsed.host_str().is_some_and(|h| LINK_HOSTS.contains(&h));
+    let clean = parsed.username().is_empty() && parsed.password().is_none();
+    (parsed.scheme() == "https" && host_ok && clean).then_some(parsed)
+}
+
 // ---- Commands ---------------------------------------------------------------
 
 #[tauri::command]
@@ -187,11 +226,13 @@ fn save_settings(
     state: tauri::State<'_, AppState>,
     next: Settings,
 ) -> Result<Settings, String> {
+    let mut next = next;
+    next.monthly_limit = settings::clamp_limit(next.monthly_limit);
     let previous = state.snapshot();
     settings::save(
         &app,
         &Stored {
-            api_key: state.key(),
+            api_key: secret::file_copy(&state.key()),
             prefs: next.clone(),
         },
     )?;
@@ -204,7 +245,7 @@ fn save_settings(
             let _ = settings::save(
                 &app,
                 &Stored {
-                    api_key: state.key(),
+                    api_key: secret::file_copy(&state.key()),
                     prefs: previous,
                 },
             );
@@ -239,13 +280,20 @@ fn set_api_key(
         return Err("That key has a space in it. Copy it again, whole.".into());
     }
 
-    settings::save(
-        &app,
-        &Stored {
-            api_key: key.clone(),
-            prefs: state.snapshot(),
-        },
-    )?;
+    if key.chars().count() > 300 || !key.chars().all(|c| c.is_ascii_graphic()) {
+        return Err("That does not look like a Google Cloud API key.".into());
+    }
+
+    secret::save(&key)?;
+    if secret::IN_FILE {
+        settings::save(
+            &app,
+            &Stored {
+                api_key: key.clone(),
+                prefs: state.snapshot(),
+            },
+        )?;
+    }
     *state.api_key.lock().expect("key mutex poisoned") = key.clone();
     let _ = app.emit(KEY_CHANGED, ());
     Ok(KeyStatus::of(&key))
@@ -253,6 +301,8 @@ fn set_api_key(
 
 #[tauri::command]
 fn clear_api_key(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<KeyStatus, String> {
+    secret::delete()?;
+    // Also rewrites a settings.json that still carried a key from 0.1.x.
     settings::save(
         &app,
         &Stored {
@@ -293,11 +343,11 @@ async fn list_languages(state: tauri::State<'_, AppState>) -> Result<Vec<google:
         .map_err(String::from)
 }
 
-/// Add a finished translation to the month's tally and tell both windows.
-fn bill(app: &AppHandle, state: &AppState, characters: u64) {
+/// Swap a reservation for what Google really billed, and tell both windows.
+fn settle(app: &AppHandle, state: &AppState, reserved: u64, actual: u64) {
     {
         let mut tally = state.usage.lock().expect("usage mutex poisoned");
-        tally.spend(characters);
+        tally.settle(reserved, actual);
         usage::save(app, &tally);
     }
     let _ = app.emit(USAGE_CHANGED, ());
@@ -325,6 +375,15 @@ async fn translate_text(
     let key = state.key();
     let source = pinned_source(&source_lang);
 
+    // The monthly limit is checked, and the characters counted, before
+    // anything is sent: a refused request never reaches Google.
+    let reserved = google::billable_characters(&text);
+    {
+        let limit = state.snapshot().monthly_limit;
+        let mut tally = state.usage.lock().expect("usage mutex poisoned");
+        tally.reserve(reserved, limit)?;
+    }
+
     let result = google::translate(
         &state.http,
         google::Request {
@@ -338,12 +397,11 @@ async fn translate_text(
 
     match result {
         Ok(t) => {
-            if t.characters > 0 {
-                bill(&app, &state, t.characters);
-            }
+            settle(&app, &state, reserved, t.characters);
             Ok(t)
         }
         Err(e) => {
+            settle(&app, &state, reserved, 0);
             if e.kind == google::ErrorKind::Quota {
                 note_block(&app, &state);
             }
@@ -354,9 +412,10 @@ async fn translate_text(
 
 #[tauri::command]
 fn usage_today(state: tauri::State<'_, AppState>) -> usage::Snapshot {
+    let limit = state.snapshot().monthly_limit;
     let mut tally = state.usage.lock().expect("usage mutex poisoned");
     tally.roll();
-    tally.snapshot()
+    tally.snapshot(limit)
 }
 
 /// Longest text the desk window will offer to translate, so the two sides agree
@@ -364,6 +423,91 @@ fn usage_today(state: tauri::State<'_, AppState>) -> usage::Snapshot {
 #[tauri::command]
 fn max_characters() -> usize {
     google::MAX_TOTAL_CHARS
+}
+
+/// Open an allowed https link in the default browser.
+#[tauri::command]
+fn open_link(app: AppHandle, url: String) -> Result<(), String> {
+    let parsed =
+        allowed_link(&url).ok_or_else(|| "That link is not on the allowed list.".to_string())?;
+    app.opener()
+        .open_url(parsed.as_str(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_download_page(app: AppHandle) -> Result<(), String> {
+    app.opener()
+        .open_url(DOWNLOAD_PAGE, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInfo {
+    current: String,
+    latest: Option<String>,
+    newer: bool,
+}
+
+fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
+    let mut it = v
+        .trim()
+        .trim_start_matches('v')
+        .split('.')
+        .map(|p| p.parse::<u64>().ok());
+    let version = (it.next()??, it.next()??, it.next()??);
+    it.next().is_none().then_some(version)
+}
+
+/// The version in a GitHub release answer ("tag_name": "v1.2.3" gives "1.2.3").
+fn release_version(body: &serde_json::Value) -> Option<String> {
+    let tag = body.get("tag_name")?.as_str()?.trim();
+    let v = tag.strip_prefix('v').unwrap_or(tag);
+    (v.len() <= 20 && parse_version(v).is_some()).then(|| v.to_string())
+}
+
+fn is_newer(latest: Option<&str>, current: &str) -> bool {
+    match (latest.and_then(parse_version), parse_version(current)) {
+        (Some(l), Some(c)) => l > c,
+        _ => false,
+    }
+}
+
+/// Ask GitHub for the newest published release of Lingo. Only its version is
+/// read, and no key or text goes with the request; installing is always the
+/// user's own download.
+#[tauri::command]
+async fn check_update(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<UpdateInfo, String> {
+    let current = app.package_info().version.to_string();
+    let res = state
+        .http
+        .get(LATEST_RELEASE)
+        .header("Accept", "application/vnd.github+json")
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|_| "Could not reach GitHub.".to_string())?;
+    if res.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err("GitHub shows no public release yet.".into());
+    }
+    if !res.status().is_success() {
+        return Err(format!("GitHub answered {}.", res.status()));
+    }
+    let body: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|_| "Unexpected answer from GitHub.".to_string())?;
+    let latest = release_version(&body);
+    let newer = is_newer(latest.as_deref(), &current);
+    Ok(UpdateInfo {
+        current,
+        latest,
+        newer,
+    })
 }
 
 #[tauri::command]
@@ -538,6 +682,9 @@ pub fn run() {
             list_languages,
             translate_text,
             usage_today,
+            open_link,
+            open_download_page,
+            check_update,
             max_characters,
             hide_pop,
             open_desk,
@@ -566,6 +713,8 @@ pub fn run() {
 
             let handle = app.handle().clone();
             let loaded = settings::load(&handle);
+            // From the credential store, moving a 0.1.x key out of the file.
+            let api_key = secret::load(&handle, &loaded);
             let tally = usage::load(&handle);
 
             let http = reqwest::Client::builder()
@@ -578,7 +727,7 @@ pub fn run() {
             app.manage(AppState {
                 http,
                 settings: Mutex::new(loaded.prefs),
-                api_key: Mutex::new(loaded.api_key),
+                api_key: Mutex::new(api_key),
                 usage: Mutex::new(tally),
             });
 
@@ -590,8 +739,14 @@ pub fn run() {
             // while the state above was still being read off disk — a race the
             // frontend sees as "state not managed for field `state`". Building
             // them by hand puts the two in the only order that is safe.
+            //
+            // Each may only show the app's own pages: navigation anywhere else
+            // is refused, and window.open / target=_blank open nothing.
             for window in &app.config().app.windows {
-                tauri::WebviewWindowBuilder::from_config(&handle, window)?.build()?;
+                tauri::WebviewWindowBuilder::from_config(&handle, window)?
+                    .on_navigation(|url| is_app_url(url))
+                    .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+                    .build()?;
             }
 
             // Registered here, before any webview has finished loading, so the
@@ -649,5 +804,58 @@ mod tests {
         let empty = KeyStatus::of("  ");
         assert!(!empty.present);
         assert_eq!(empty.hint, "");
+    }
+
+    fn url(s: &str) -> Url {
+        Url::parse(s).unwrap()
+    }
+
+    #[test]
+    fn the_webviews_only_ever_show_the_app() {
+        assert!(is_app_url(&url("tauri://localhost/index.html")));
+        assert!(is_app_url(&url("http://tauri.localhost/pop.html")));
+        assert!(is_app_url(&url("https://tauri.localhost/")));
+        assert!(!is_app_url(&url("https://example.com/")));
+        assert!(!is_app_url(&url("https://tauri.localhost.example.com/")));
+        assert!(!is_app_url(&url("file:///C:/Windows/win.ini")));
+        assert!(!is_app_url(&url("http://localhost:8080/")));
+        // The Vite server, in a debug build only.
+        assert_eq!(is_app_url(&url("http://localhost:1430/")), cfg!(debug_assertions));
+    }
+
+    #[test]
+    fn links_open_only_for_the_allow_list() {
+        assert!(allowed_link("https://console.cloud.google.com/apis/credentials").is_some());
+        assert!(allowed_link("https://docs.cloud.google.com/translate/quotas").is_some());
+        assert!(allowed_link("https://github.com/gaggi32/lingo/releases").is_some());
+        assert!(allowed_link("http://console.cloud.google.com/").is_none());
+        assert!(allowed_link("https://evil.example/").is_none());
+        assert!(allowed_link("https://github.com.evil.example/").is_none());
+        assert!(allowed_link("https://user:pw@github.com/").is_none());
+        assert!(allowed_link("javascript:alert(1)").is_none());
+        assert!(allowed_link("file:///etc/passwd").is_none());
+        assert!(allowed_link("not a url").is_none());
+    }
+
+    #[test]
+    fn versions_compare_as_numbers() {
+        assert_eq!(parse_version("v1.2.3"), Some((1, 2, 3)));
+        assert_eq!(parse_version("0.10.0"), Some((0, 10, 0)));
+        assert_eq!(parse_version("1.2"), None);
+        assert_eq!(parse_version("1.2.3.4"), None);
+        assert_eq!(parse_version("1.2.x"), None);
+        assert!(is_newer(Some("0.10.0"), "0.9.9"));
+        assert!(!is_newer(Some("0.2.0"), "0.2.0"));
+        assert!(!is_newer(Some("0.1.9"), "0.2.0"));
+        assert!(!is_newer(None, "0.2.0"));
+    }
+
+    #[test]
+    fn a_release_answer_gives_its_version() {
+        let body = serde_json::json!({ "tag_name": "v0.3.1", "name": "Lingo v0.3.1" });
+        assert_eq!(release_version(&body), Some("0.3.1".into()));
+        let odd = serde_json::json!({ "tag_name": "nightly" });
+        assert_eq!(release_version(&odd), None);
+        assert_eq!(release_version(&serde_json::json!({})), None);
     }
 }

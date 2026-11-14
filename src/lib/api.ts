@@ -4,6 +4,7 @@ import type {
   Language,
   Settings,
   Translation,
+  UpdateInfo,
   Usage,
 } from "./types";
 
@@ -70,6 +71,17 @@ export const dbUrl = (): Promise<string> => invoke("db_url");
 export const suspendShortcut = (): Promise<void> => invoke("suspend_shortcut");
 
 export const resumeShortcut = (): Promise<void> => invoke("resume_shortcut");
+
+// ---- Links and updates ------------------------------------------------------
+
+/** Open an https link in the browser. Rust refuses hosts not on its list. */
+export const openLink = (url: string): Promise<void> => invoke("open_link", { url });
+
+/** The releases page on GitHub, where a new version is downloaded. */
+export const openDownloadPage = (): Promise<void> => invoke("open_download_page");
+
+/** Ask GitHub for the newest release. Sends nothing but the request itself. */
+export const checkUpdate = (): Promise<UpdateInfo> => invoke("check_update");
 
 /** Whatever a rejected `invoke` threw, as a sentence worth showing. */
 export function errorText(err: unknown): string {

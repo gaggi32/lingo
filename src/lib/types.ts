@@ -25,6 +25,10 @@ export interface Settings {
   lastSourceLang: string;
   /** Target last picked in a window, or "" when nothing has been recorded. */
   lastTargetLang: string;
+  /** Characters a month Lingo may send; Rust refuses past it. */
+  monthlyLimit: number;
+  /** Ask GitHub once a day whether a newer version is out. */
+  checkUpdates: boolean;
 }
 
 /** Everything the UI is told about the saved API key. */
@@ -46,6 +50,8 @@ export interface Translation {
 /** Mirrors `usage::Snapshot` — Lingo's own count of what this month has cost. */
 export interface Usage {
   characters: number;
+  /** The user's monthly limit: Lingo refuses to send past it. */
+  limit: number;
   /** Characters a calendar month Google does not charge for. */
   freeTier: number;
   /** Dollars per million characters past the free tier. */
@@ -70,4 +76,11 @@ export interface HistoryEntry {
   targetLang: string;
   pinned: boolean;
   createdAt: string;
+}
+
+/** Mirrors `UpdateInfo` in lib.rs. */
+export interface UpdateInfo {
+  current: string;
+  latest: string | null;
+  newer: boolean;
 }

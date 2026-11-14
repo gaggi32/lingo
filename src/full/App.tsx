@@ -3,10 +3,11 @@ import Workbench from "./Workbench";
 import History from "./History";
 import SettingsPanel from "./Settings";
 import UsageMeter from "./UsageMeter";
-import { errorText, getSettings, saveSettings } from "../lib/api";
+import { errorText, getSettings, openDownloadPage, saveSettings } from "../lib/api";
 import { notifySettingsChanged } from "../lib/events";
 import { acceleratorToKeys } from "../lib/shortcut";
 import { applySavedStayOnTopFullscreen } from "../lib/topmost";
+import { dailyCheck } from "../lib/updates";
 import {
   ClockIcon,
   LanguagesIcon,
@@ -28,10 +29,25 @@ export default function App() {
   const [loadError, setLoadError] = useState("");
   /** Set when History hands a row back to the translator to work on. */
   const [handoff, setHandoff] = useState<HistoryEntry | null>(null);
+  /** A newer release on GitHub, from the once-a-day check. */
+  const [newer, setNewer] = useState<string | null>(null);
 
   useEffect(() => {
     getSettings().then(setSettings).catch((e) => setLoadError(errorText(e)));
   }, []);
+
+  const checkUpdates = settings?.checkUpdates ?? false;
+  useEffect(() => {
+    if (!checkUpdates) {
+      setNewer(null);
+      return;
+    }
+    let live = true;
+    void dailyCheck(__APP_VERSION__).then((v) => live && setNewer(v));
+    return () => {
+      live = false;
+    };
+  }, [checkUpdates]);
 
   // Re-apply the fullscreen-topmost watchdog, if enabled, once on launch.
   useEffect(() => {
@@ -106,6 +122,17 @@ export default function App() {
         </ul>
 
         <div className="mt-auto space-y-3 px-1 pt-4">
+          {newer && (
+            <button
+              type="button"
+              onClick={() => void openDownloadPage()}
+              className="w-full rounded-lg bg-iris-50 px-2.5 py-2 text-left text-[12px] leading-snug text-iris-700 transition-colors hover:bg-iris-100 dark:bg-iris-500/15 dark:text-iris-200 dark:hover:bg-iris-500/25"
+            >
+              <span className="font-semibold">Lingo {newer} is out.</span>{" "}
+              Download it from GitHub.
+            </button>
+          )}
+
           <UsageMeter />
 
           <p className="flex flex-wrap items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500">

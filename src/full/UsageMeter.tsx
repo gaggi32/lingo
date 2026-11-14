@@ -43,7 +43,8 @@ export default function UsageMeter() {
 
   if (!usage) return null;
 
-  const share = Math.min(100, (usage.characters / usage.freeTier) * 100);
+  // The bar fills towards the user's own limit, where Lingo stops sending.
+  const share = Math.min(100, (usage.characters / Math.max(1, usage.limit)) * 100);
   const over = Math.max(0, usage.characters - usage.freeTier);
   const cost = (over / 1_000_000) * usage.usdPerMillion;
 
@@ -54,7 +55,7 @@ export default function UsageMeter() {
           This month
         </span>
         <span className="text-[11px] tabular-nums text-slate-400 dark:text-slate-500">
-          {over > 0 ? money.format(cost) : `${Math.round(share)}%`}
+          {over > 0 ? `≈ ${money.format(cost)}` : `${Math.round(share)}%`}
         </span>
       </div>
 
@@ -62,9 +63,9 @@ export default function UsageMeter() {
         <div
           className={[
             "h-full rounded-full transition-[width] duration-500",
-            usage.quotaBlocked || over > 0
+            usage.quotaBlocked || share >= 100
               ? "bg-rose-500"
-              : share > 75
+              : share > 75 || over > 0
                 ? "bg-amber-500"
                 : "bg-iris-500",
           ].join(" ")}
@@ -73,11 +74,15 @@ export default function UsageMeter() {
       </div>
 
       <p className="mt-1 text-[10.5px] tabular-nums text-slate-400 dark:text-slate-500">
-        {fmt.format(usage.characters)} / {fmt.format(usage.freeTier)} free
-        characters
+        {fmt.format(usage.characters)} / {fmt.format(usage.limit)} characters
       </p>
 
-      {usage.quotaBlocked ? (
+      {share >= 100 ? (
+        <p className="mt-0.5 text-[10px] font-medium leading-snug text-rose-600 dark:text-rose-400">
+          Your monthly limit is reached. Lingo sends nothing more until next
+          month, or until you raise it in Settings.
+        </p>
+      ) : usage.quotaBlocked ? (
         <p className="mt-0.5 text-[10px] font-medium leading-snug text-rose-600 dark:text-rose-400">
           Google last refused this project for quota.
         </p>
@@ -85,7 +90,9 @@ export default function UsageMeter() {
         <p className="mt-0.5 text-[10px] leading-snug text-slate-400 dark:text-slate-500">
           {over > 0
             ? `Past the free tier — about ${money.format(cost)} so far, at $${usage.usdPerMillion} per million.`
-            : "Lingo's own count — Google keeps the real one."}
+            : usage.limit <= usage.freeTier
+              ? "Your limit is inside Google's free tier. Lingo's own count — Google keeps the real one."
+              : "Lingo's own count — Google keeps the real one."}
         </p>
       )}
     </div>

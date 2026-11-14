@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   disable as disableAutostart,
   enable as enableAutostart,
@@ -17,14 +16,18 @@ import {
   ResetIcon,
 } from "../components/icons";
 import {
+  checkUpdate,
   clearApiKey,
   errorText,
+  openDownloadPage,
+  openLink,
   resumeShortcut,
   setApiKey,
   suspendShortcut,
   verifyKey,
 } from "../lib/api";
-import { acceleratorToKeys, eventToChord } from "../lib/shortcut";
+import { acceleratorToKeys, eventToChord, IS_MAC } from "../lib/shortcut";
+import { isNewer, remember } from "../lib/updates";
 import { nameOf } from "../lib/languages";
 import { startPair, withDefaultPair } from "../lib/pair";
 import {
@@ -42,6 +45,30 @@ const ENABLE_API =
   "https://console.cloud.google.com/apis/library/translate.googleapis.com";
 /** What it costs once the free half-million characters are gone. */
 const PRICING = "https://cloud.google.com/translate/pricing";
+const NEW_PROJECT = "https://console.cloud.google.com/projectcreate";
+const BILLING = "https://console.cloud.google.com/billing";
+/** Where the daily character cap is set — Google's own hard stop. */
+const QUOTAS =
+  "https://console.cloud.google.com/apis/api/translate.googleapis.com/quotas";
+const BUDGETS = "https://console.cloud.google.com/billing/budgets";
+
+const IS_WINDOWS =
+  typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+
+/** Where this build keeps the key, in words. */
+const KEY_HOME = IS_WINDOWS
+  ? "Windows Credential Manager"
+  : IS_MAC
+    ? "the macOS Keychain"
+    : "Lingo's settings.json (Linux has no credential store Lingo uses)";
+
+/** Monthly limits the Settings screen offers, in characters. */
+const LIMITS = [
+  100_000, 250_000, 500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000,
+  50_000_000,
+];
+const FREE_TIER = 500_000;
+const USD_PER_MILLION = 20;
 
 const DEFAULT_HOTKEY = "CommandOrControl+Shift+L";
 
@@ -55,10 +82,11 @@ export default function SettingsPanel({ settings, save }: Props) {
     <div className="tidy-scroll h-full overflow-y-auto">
       <div className="mx-auto max-w-2xl space-y-8 px-6 py-6">
         <KeySection />
+        <SpendingSection settings={settings} save={save} />
         <TranslationSection settings={settings} save={save} />
         <PopupSection settings={settings} save={save} />
         <SystemSection />
-        <AboutSection />
+        <AboutSection settings={settings} save={save} />
       </div>
     </div>
   );
@@ -178,7 +206,7 @@ function Link({ url, children }: { url: string; children: React.ReactNode }) {
   return (
     <button
       type="button"
-      onClick={() => void openUrl(url)}
+      onClick={() => void openLink(url).catch((e) => console.error(e))}
       className="inline-flex items-center gap-1 text-[12.5px] font-medium text-iris-600 transition-colors hover:text-iris-700 dark:text-iris-300 dark:hover:text-iris-200"
     >
       {children}
@@ -278,8 +306,7 @@ function KeySection() {
           </p>
         ) : (
           <p className="mb-2 text-[12.5px] leading-snug text-slate-500 dark:text-slate-400">
-            Create one under <em>APIs &amp; Services → Credentials</em>, then
-            enable the Cloud Translation API on the same project.
+            No key yet. The steps below take about five minutes.
           </p>
         )}
 
@@ -369,15 +396,130 @@ function KeySection() {
         </div>
       </div>
 
+      <KeyGuide open={status !== null && !saved} />
+
       <div className="flex items-start gap-2.5 px-4 py-3 text-[12.5px] leading-snug text-slate-500 dark:text-slate-400">
         <KeyIcon className="mt-[2px] shrink-0 text-[14px]" />
         <p>
-          Lingo keeps the key in its own config folder in plain text, and never
-          hands it to the part of the app that draws the screen. It is still a
-          billable credential: restrict it to the Cloud Translation API in the
-          Cloud console, and set a quota, so a key that does get out cannot be
-          spent on anything else.
+          Lingo keeps the key in {KEY_HOME} and never hands it to the part of
+          the app that draws the screen. Treat it like a password: don&apos;t
+          paste it into chats, screenshots or code. If it ever gets out, delete
+          it under <em>Credentials</em> in the Cloud console and make a new
+          one.
         </p>
+      </div>
+    </Section>
+  );
+}
+
+/** The numbered steps to a working, capped key. Open until a key is saved. */
+function KeyGuide({ open }: { open: boolean }) {
+  const step = "text-[12.5px] leading-snug text-slate-600 dark:text-slate-300";
+  const note = "mt-0.5 block text-[12px] text-slate-500 dark:text-slate-400";
+  return (
+    <details open={open} className="group px-4 py-3">
+      <summary className="cursor-pointer select-none text-[13px] font-medium text-slate-700 dark:text-slate-200">
+        How to get a key (about 5 minutes)
+      </summary>
+      <ol className="mt-2.5 list-decimal space-y-2 pl-5 marker:text-slate-400">
+        <li className={step}>
+          Create a project in the Google Cloud console, or pick one you have.{" "}
+          <Link url={NEW_PROJECT}>New project</Link>
+        </li>
+        <li className={step}>
+          Set up billing on it. Google asks for a card even inside the free
+          tier; new accounts start with a free trial credit.{" "}
+          <Link url={BILLING}>Billing</Link>
+        </li>
+        <li className={step}>
+          Enable the <em>Cloud Translation API</em> on that project.{" "}
+          <Link url={ENABLE_API}>Enable the API</Link>
+        </li>
+        <li className={step}>
+          Create an API key: <em>Create credentials → API key</em>.{" "}
+          <Link url={CREDENTIALS}>Credentials</Link>
+        </li>
+        <li className={step}>
+          Restrict it: edit the key, under <em>API restrictions</em> choose{" "}
+          <em>Restrict key</em>, tick only <em>Cloud Translation API</em>, and
+          save.
+          <span className={note}>
+            A restricted key that leaks cannot be spent on anything else.
+          </span>
+        </li>
+        <li className={step}>
+          Cap it at Google: on the API&apos;s <em>Quotas</em> page, edit{" "}
+          <em>Characters sent to general model per project per day</em> and
+          set it to 16,000 — about the free 500,000 a month.{" "}
+          <Link url={QUOTAS}>Quotas</Link>
+          <span className={note}>
+            It is unlimited until you change it. This is the hard stop that
+            protects you whatever happens to the key; changes can take up to a
+            day to apply, and the count resets at midnight Pacific time.
+          </span>
+        </li>
+        <li className={step}>
+          Optional: add a budget alert, so Google emails you if anything is
+          ever billed. An alert does not stop spending — the quota does.{" "}
+          <Link url={BUDGETS}>Budgets</Link>
+        </li>
+        <li className={step}>
+          Paste the key above and press <em>Save &amp; check</em>. The check is
+          free.
+        </li>
+      </ol>
+    </details>
+  );
+}
+
+// ---- Spending ---------------------------------------------------------------
+
+const count = new Intl.NumberFormat();
+const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
+
+/** What a month at `limit` characters could cost at Google's list price. */
+function worstCase(limit: number): string {
+  const over = Math.max(0, limit - FREE_TIER);
+  return over === 0 ? "free" : `up to ${usd.format((over / 1_000_000) * USD_PER_MILLION)}`;
+}
+
+function SpendingSection({ settings, save }: Props) {
+  const options = LIMITS.includes(settings.monthlyLimit)
+    ? LIMITS
+    : [...LIMITS, settings.monthlyLimit].sort((a, b) => a - b);
+
+  return (
+    <Section
+      title="Spending limit"
+      hint="Lingo counts the characters it sends and stops before a month goes past this. A refused translation is not sent, so it costs nothing."
+    >
+      <Row
+        label="Characters a month"
+        description={
+          settings.monthlyLimit <= FREE_TIER
+            ? "Inside Google's free 500,000 characters, so Lingo alone cannot cost you anything."
+            : `Past the free 500,000 characters Google charges $${USD_PER_MILLION} per million: this limit is ${worstCase(settings.monthlyLimit)} a month from Lingo.`
+        }
+      >
+        <select
+          aria-label="Characters a month"
+          value={settings.monthlyLimit}
+          onChange={(e) =>
+            void save({ ...settings, monthlyLimit: Number(e.target.value) })
+          }
+          className="field py-1.5 text-[12.5px] tabular-nums"
+        >
+          {options.map((n) => (
+            <option key={n} value={n}>
+              {count.format(n)} ({worstCase(n)})
+            </option>
+          ))}
+        </select>
+      </Row>
+      <div className="px-4 py-3 text-[12px] leading-snug text-slate-500 dark:text-slate-400">
+        This only counts Lingo. Anything else using the same Google project
+        spends the same free tier, so the daily quota in the key steps above is
+        the stop that covers everything.
       </div>
     </Section>
   );
@@ -739,8 +881,77 @@ function SystemSection() {
 
 // ---- About ------------------------------------------------------------------
 
-function AboutSection() {
+function UpdateRow({ settings, save }: Props) {
+  const [state, setState] = useState<"idle" | "checking" | "done">("idle");
+  const [message, setMessage] = useState("");
+  const [newer, setNewer] = useState(false);
+
+  const check = async () => {
+    setState("checking");
+    setMessage("");
+    try {
+      const info = await checkUpdate();
+      remember(info.latest);
+      const found = isNewer(info.latest, __APP_VERSION__);
+      setNewer(found);
+      setMessage(
+        found
+          ? `Lingo ${info.latest} is out.`
+          : `You have the newest version (${__APP_VERSION__}).`,
+      );
+    } catch (err) {
+      setNewer(false);
+      setMessage(errorText(err));
+    }
+    setState("done");
+  };
+
   return (
+    <Section title="Updates">
+      <Row
+        label="Check for updates"
+        description="Once a day, Lingo asks GitHub for the version number of its newest release. Nothing else is sent, and installing is always your own download."
+      >
+        <Toggle
+          label="Check for updates"
+          on={settings.checkUpdates}
+          onChange={(v) => void save({ ...settings, checkUpdates: v })}
+        />
+      </Row>
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3 text-[12.5px]">
+        <span className="text-slate-500 dark:text-slate-400">
+          Version {__APP_VERSION__}
+        </span>
+        <button
+          type="button"
+          onClick={() => void check()}
+          disabled={state === "checking"}
+          className="ghost px-2 py-1 text-[12.5px] font-medium disabled:opacity-40"
+        >
+          {state === "checking" ? "Checking…" : "Check now"}
+        </button>
+        {message && (
+          <span className="text-slate-500 dark:text-slate-400">{message}</span>
+        )}
+        {newer && (
+          <button
+            type="button"
+            onClick={() => void openDownloadPage()}
+            className="inline-flex items-center gap-1 font-medium text-iris-600 hover:text-iris-700 dark:text-iris-300"
+          >
+            Download
+            <ExternalIcon className="text-[12px]" />
+          </button>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+function AboutSection({ settings, save }: Props) {
+  return (
+    <>
+    <UpdateRow settings={settings} save={save} />
     <section className="pb-2">
       <h2 className="text-[13px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
         About
@@ -751,20 +962,22 @@ function AboutSection() {
           Translation API.
         </p>
         <p>
-          Your preferences and your API key live in a plain{" "}
+          The API key is kept in {KEY_HOME}. Your preferences are a{" "}
           <code>settings.json</code> in Lingo&apos;s own config folder, the
           month&apos;s usage tally sits beside it, and the history is a local
-          SQLite file in the data folder. None of them is encrypted: anything
-          running as your user account can read them.
+          SQLite file in the data folder. Those three are not encrypted:
+          anything running as your user account can read them.
         </p>
         <p>
-          Nothing is sent anywhere except the text you translate, which goes to
-          Google and nowhere else. Google states that Cloud Translation does not
+          The text you translate goes to Google and nowhere else; the only
+          other request Lingo makes is the update check above, to GitHub, which
+          carries no text and no key. Google states that Cloud Translation does not
           use your content to train its models — which is the main way it
           differs from the free consumer endpoint — but it is still someone
           else&apos;s server, so treat it accordingly.
         </p>
       </div>
     </section>
+    </>
   );
 }

@@ -186,6 +186,18 @@ struct ApiErrorItem {
 
 // ---- Requests ---------------------------------------------------------------
 
+fn count(sending: &[&str]) -> u64 {
+    sending.iter().map(|s| s.chars().count() as u64).sum()
+}
+
+/// What translating `text` would send, and so what Google would bill: the
+/// same count [`translate`] reports. Used to check the monthly limit before
+/// anything leaves the machine.
+pub fn billable_characters(text: &str) -> u64 {
+    let plan = Plan::of(text);
+    count(&plan.to_translate())
+}
+
 /// Translate one piece of text.
 pub async fn translate(http: &reqwest::Client, req: Request<'_>) -> Result<Translation, Error> {
     let key = req.api_key.trim();
@@ -228,7 +240,7 @@ pub async fn translate(http: &reqwest::Client, req: Request<'_>) -> Result<Trans
     if sending.is_empty() {
         return Err(Error::other("There is nothing to translate."));
     }
-    let characters = sending.iter().map(|s| s.chars().count() as u64).sum();
+    let characters = count(&sending);
 
     let payload = TranslatePayload {
         q: &sending,
@@ -555,6 +567,14 @@ fn decode_entity(body: &str) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_limit_check_counts_what_would_be_billed() {
+        // Blank lines are never sent, so they are never counted.
+        assert_eq!(billable_characters("hello\n\n  \nworld"), 10);
+        assert_eq!(billable_characters("Grüße"), 5);
+        assert_eq!(billable_characters(""), 0);
+    }
 
     #[test]
     fn google_escapes_its_answers_even_as_plain_text() {

@@ -1,4 +1,4 @@
-//! Persisted preferences, and the API key that sits beside them.
+//! Persisted preferences.
 //!
 //! Everything lives in one JSON file inside the per-user app config directory
 //! (`%APPDATA%\com.lingo.translate` on Windows, `~/Library/Application
@@ -10,16 +10,12 @@
 //!
 //! ## Why the key is not part of `Settings`
 //!
-//! A Google Cloud API key is billable. It is read here, kept in process memory
-//! and handed to `google.rs`, and it is never serialised to a webview: the
-//! [`Settings`] struct that crosses the IPC boundary has no field for it, and
-//! [`Stored`] — the shape on disk — is the only thing that does. That also
-//! means a stale settings object round-tripping through the UI can never blank
-//! the key by accident, because it does not carry one to blank it with.
-//!
-//! The key is stored in plain text, readable by the account that owns it and by
-//! nothing else on a normally configured machine. The Settings screen says so,
-//! and points at Google's key restrictions as the real defence.
+//! A Google Cloud API key is billable. It is kept in process memory and handed
+//! to `google.rs`, and it is never serialised to a webview: the [`Settings`]
+//! struct that crosses the IPC boundary has no field for it. On Windows and
+//! macOS it lives in the OS credential store (see `secret.rs`); [`Stored`]
+//! still has an `apiKey` field so that a 0.1.x file can be read and its key
+//! moved, and so that Linux, which has no store, can keep it here.
 
 use std::path::PathBuf;
 
@@ -33,6 +29,19 @@ pub const DEFAULT_HOTKEY: &str = "CommandOrControl+Shift+L";
 
 /// Default target. Google spells plain languages as ISO-639-1, lower case.
 pub const DEFAULT_TARGET: &str = "en";
+
+/// Characters a month Lingo will send before it refuses, unless the user
+/// raises it: Google's free tier, so the default can never cost anything.
+pub const DEFAULT_MONTHLY_LIMIT: u64 = 500_000;
+/// Lowest and highest limit the Settings screen may set. There is no
+/// "unlimited": 50 million characters is about $990 a month at Google's price.
+pub const MIN_MONTHLY_LIMIT: u64 = 1_000;
+pub const MAX_MONTHLY_LIMIT: u64 = 50_000_000;
+
+/// Keep a limit inside the range above.
+pub fn clamp_limit(limit: u64) -> u64 {
+    limit.clamp(MIN_MONTHLY_LIMIT, MAX_MONTHLY_LIMIT)
+}
 
 /// Everything the webviews are allowed to see and send back.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +75,11 @@ pub struct Settings {
     /// target is never legitimately empty, which is what makes it the field
     /// worth asking; the two are always written together.
     pub last_target_lang: String,
+    /// Characters a calendar month Lingo may send to Google. Enforced in Rust
+    /// before every request (see `usage.rs`).
+    pub monthly_limit: u64,
+    /// Ask GitHub once a day whether a newer release is out.
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -82,6 +96,8 @@ impl Default for Settings {
             remember_last_lang: true,
             last_source_lang: String::new(),
             last_target_lang: String::new(),
+            monthly_limit: DEFAULT_MONTHLY_LIMIT,
+            check_updates: true,
         }
     }
 }
@@ -91,16 +107,19 @@ impl Default for Settings {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Stored {
-    /// Google Cloud API key with the Cloud Translation API enabled. Empty until
-    /// the user pastes one in.
+    /// Google Cloud API key. Only Linux builds write it (see `secret.rs`);
+    /// elsewhere it is read once, to move a 0.1.x key into the credential
+    /// store, and never written again.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub api_key: String,
     #[serde(flatten)]
     pub prefs: Settings,
 }
 
-/// Regional codes Google keeps distinct. Everything else it wants as a bare
-/// language, and answers `Invalid Value` to anything with a region on it.
-const REGIONAL: [&str; 2] = ["zh-CN", "zh-TW"];
+/// Codes with a suffix Google keeps distinct (two Chinese scripts, and
+/// Meiteilon in Meetei Mayek). Everything else it wants as a bare language,
+/// and answers `Invalid Value` to anything with a region on it.
+const REGIONAL: [&str; 3] = ["zh-CN", "zh-TW", "mni-Mtei"];
 
 /// Put a language code into the spelling Google expects.
 ///
@@ -171,6 +190,7 @@ pub fn load(app: &AppHandle) -> Stored {
     // default would claim a pair the user never picked.
     stored.prefs.last_source_lang = normalise_lang(&stored.prefs.last_source_lang);
     stored.prefs.last_target_lang = normalise_lang(&stored.prefs.last_target_lang);
+    stored.prefs.monthly_limit = clamp_limit(stored.prefs.monthly_limit);
     stored
 }
 
@@ -181,7 +201,11 @@ pub fn save(app: &AppHandle, stored: &Stored) -> Result<(), String> {
     }
     let json =
         serde_json::to_string_pretty(stored).map_err(|e| format!("Couldn't encode settings: {e}"))?;
-    std::fs::write(&p, json).map_err(|e| format!("Couldn't write {}: {e}", p.display()))
+    // Write beside it and rename over it, so a crash mid-write never leaves a
+    // half-written file (rename replaces the old one on every platform).
+    let tmp = p.with_extension("json.tmp");
+    std::fs::write(&tmp, json).map_err(|e| format!("Couldn't write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &p).map_err(|e| format!("Couldn't replace {}: {e}", p.display()))
 }
 
 /// The tail of a key, for showing which one is saved without showing the key.
@@ -214,6 +238,12 @@ mod tests {
     fn chinese_keeps_its_region() {
         assert_eq!(normalise_lang("zh-CN"), "zh-CN");
         assert_eq!(normalise_lang("ZH-tw"), "zh-TW");
+    }
+
+    #[test]
+    fn meiteilon_keeps_its_script() {
+        // Google lists it only as "mni-Mtei"; a bare "mni" is refused.
+        assert_eq!(normalise_lang("mni-Mtei"), "mni-Mtei");
     }
 
     #[test]
@@ -257,6 +287,24 @@ mod tests {
         // Fields added since take their defaults rather than failing the read.
         assert!(stored.prefs.remember_last_lang);
         assert_eq!(stored.prefs.last_target_lang, "");
+        assert_eq!(stored.prefs.monthly_limit, DEFAULT_MONTHLY_LIMIT);
+        assert!(stored.prefs.check_updates);
+    }
+
+    #[test]
+    fn a_0_1_file_with_a_key_still_hands_the_key_over() {
+        let raw = r#"{ "apiKey": " AIzaSyOLD ", "targetLang": "de" }"#;
+        let stored: Stored = serde_json::from_str(raw).unwrap();
+        assert_eq!(stored.api_key.trim(), "AIzaSyOLD");
+        assert_eq!(stored.prefs.target_lang, "de");
+    }
+
+    #[test]
+    fn the_limit_stays_in_range() {
+        assert_eq!(clamp_limit(0), MIN_MONTHLY_LIMIT);
+        assert_eq!(clamp_limit(u64::MAX), MAX_MONTHLY_LIMIT);
+        assert_eq!(clamp_limit(2_000_000), 2_000_000);
+        assert_eq!(DEFAULT_MONTHLY_LIMIT, 500_000);
     }
 
     #[test]
@@ -271,8 +319,14 @@ mod tests {
     #[test]
     fn the_file_round_trips_as_camel_case() {
         let json = serde_json::to_string(&Stored::default()).unwrap();
-        assert!(json.contains("apiKey"), "{json}");
+        // No key, no field: a file written after the move to the credential
+        // store does not even mention one.
+        assert!(!json.contains("apiKey"), "{json}");
+        let with_key = Stored { api_key: "AIzaX".into(), ..Stored::default() };
+        assert!(serde_json::to_string(&with_key).unwrap().contains("apiKey"));
         assert!(json.contains("targetLang"), "{json}");
+        assert!(json.contains("monthlyLimit"), "{json}");
+        assert!(json.contains("checkUpdates"), "{json}");
         assert!(json.contains("liveTranslate"), "{json}");
         assert!(json.contains("preserveInput"), "{json}");
         assert!(json.contains("rememberLastLang"), "{json}");

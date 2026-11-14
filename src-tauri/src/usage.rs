@@ -6,6 +6,10 @@
 //! in Cloud Billing, hours behind — so Lingo counts what it sends itself and
 //! keeps the tally in a small file beside the settings.
 //!
+//! The same tally enforces the user's monthly limit (`monthlyLimit` in the
+//! settings, Google's free tier by default): a translation is refused *before*
+//! anything is sent when it would take the month past it. See [`Usage::reserve`].
+//!
 //! This is Lingo's own count, not Google's invoice. Anything else on the same
 //! project spends the same free tier, Google resets on its own clock rather
 //! than ours, and a request that fails after the characters were sent may still
@@ -42,6 +46,8 @@ pub struct Usage {
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     pub characters: u64,
+    /// The user's monthly limit; Lingo refuses past it.
+    pub limit: u64,
     pub free_tier: u64,
     pub usd_per_million: f64,
     pub quota_blocked: bool,
@@ -90,6 +96,31 @@ impl Usage {
         }
     }
 
+    /// Count `needed` characters against the month before they are sent, or
+    /// refuse with a sentence saying why when they would pass `limit`.
+    ///
+    /// Reserved up front, under the lock, so two requests in flight at once
+    /// cannot both squeeze under the limit. [`Usage::settle`] corrects the
+    /// count once Google has answered.
+    pub fn reserve(&mut self, needed: u64, limit: u64) -> Result<(), String> {
+        self.roll();
+        if self.characters.saturating_add(needed) > limit {
+            return Err(refusal(self.characters, limit, needed));
+        }
+        self.characters = self.characters.saturating_add(needed);
+        Ok(())
+    }
+
+    /// Swap a reservation for what was really sent: `actual` after a
+    /// translation (0 if Google was never asked), or 0 after an error.
+    pub fn settle(&mut self, reserved: u64, actual: u64) {
+        self.roll();
+        self.characters = self.characters.saturating_sub(reserved);
+        if actual > 0 {
+            self.spend(actual);
+        }
+    }
+
     /// Record a translation that has already happened.
     pub fn spend(&mut self, characters: u64) {
         self.roll();
@@ -106,14 +137,38 @@ impl Usage {
         self.quota_blocked = true;
     }
 
-    pub fn snapshot(&self) -> Snapshot {
+    pub fn snapshot(&self, limit: u64) -> Snapshot {
         Snapshot {
             characters: self.characters,
+            limit,
             free_tier: FREE_TIER,
             usd_per_million: USD_PER_MILLION,
             quota_blocked: self.quota_blocked,
         }
     }
+}
+
+/// 1234567 as "1,234,567".
+fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// What the user is told when the limit stops a translation.
+pub fn refusal(used: u64, limit: u64, needed: u64) -> String {
+    format!(
+        "Not sent: this needs {} characters, and {} of your {} for this month are used. Nothing was billed. Raise the limit in Settings → Spending limit, or wait for next month.",
+        grouped(needed),
+        grouped(used),
+        grouped(limit),
+    )
 }
 
 fn path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -179,7 +234,7 @@ mod tests {
         let mut u = Usage::default();
         u.spend(120);
         u.spend(80);
-        assert_eq!(u.snapshot().characters, 200);
+        assert_eq!(u.snapshot(500_000).characters, 200);
     }
 
     #[test]
@@ -187,13 +242,13 @@ mod tests {
         let mut u = Usage::default();
         u.spend(400_000);
         u.blocked();
-        assert!(u.snapshot().quota_blocked);
+        assert!(u.snapshot(500_000).quota_blocked);
 
         // Pretend the file was written last month.
         u.month -= 1;
         u.roll();
 
-        let snap = u.snapshot();
+        let snap = u.snapshot(500_000);
         assert_eq!(snap.characters, 0);
         assert!(!snap.quota_blocked);
     }
@@ -205,13 +260,59 @@ mod tests {
         let mut u = Usage::default();
         u.blocked();
         u.spend(10);
-        assert!(!u.snapshot().quota_blocked);
+        assert!(!u.snapshot(500_000).quota_blocked);
     }
 
     #[test]
     fn the_snapshot_carries_googles_own_numbers() {
-        let snap = Usage::default().snapshot();
+        let snap = Usage::default().snapshot(123);
         assert_eq!(snap.free_tier, 500_000);
         assert_eq!(snap.usd_per_million, 20.0);
+        assert_eq!(snap.limit, 123);
+    }
+
+    #[test]
+    fn the_limit_refuses_before_anything_is_counted() {
+        let mut u = Usage::default();
+        u.spend(499_000);
+        let err = u.reserve(1_001, 500_000).unwrap_err();
+        assert!(err.contains("1,001"), "{err}");
+        assert!(err.contains("499,000"), "{err}");
+        assert!(err.contains("500,000"), "{err}");
+        assert!(err.contains("Settings"), "{err}");
+        // The refusal spent nothing.
+        assert_eq!(u.snapshot(500_000).characters, 499_000);
+        // Exactly up to the limit is fine.
+        assert!(u.reserve(1_000, 500_000).is_ok());
+        assert_eq!(u.snapshot(500_000).characters, 500_000);
+        assert!(u.reserve(1, 500_000).is_err());
+    }
+
+    #[test]
+    fn a_reservation_settles_to_what_was_sent() {
+        let mut u = Usage::default();
+        u.spend(100);
+        u.reserve(50, 1_000).unwrap();
+        // A failed request is not billed: the reservation is given back.
+        u.settle(50, 0);
+        assert_eq!(u.snapshot(1_000).characters, 100);
+        u.reserve(50, 1_000).unwrap();
+        u.settle(50, 40);
+        assert_eq!(u.snapshot(1_000).characters, 140);
+    }
+
+    #[test]
+    fn two_requests_in_flight_cannot_both_slip_under() {
+        let mut u = Usage::default();
+        assert!(u.reserve(300, 500).is_ok());
+        assert!(u.reserve(300, 500).is_err());
+    }
+
+    #[test]
+    fn numbers_are_grouped_for_reading() {
+        assert_eq!(grouped(0), "0");
+        assert_eq!(grouped(999), "999");
+        assert_eq!(grouped(1_000), "1,000");
+        assert_eq!(grouped(50_000_000), "50,000,000");
     }
 }
