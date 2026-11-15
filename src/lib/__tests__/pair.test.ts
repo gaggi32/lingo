@@ -11,6 +11,7 @@ const base: Settings = {
   saveHistory: true,
   liveTranslate: true,
   preserveInput: false,
+  stayOnTopFullscreen: false,
   rememberLastLang: true,
   lastSourceLang: "",
   lastTargetLang: "",

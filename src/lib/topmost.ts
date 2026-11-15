@@ -1,31 +1,37 @@
-import { invoke } from "@tauri-apps/api/core";
+import { saveSettings } from "./api";
+import type { Settings } from "./types";
 
 /**
- * "Stay on top of fullscreen apps" setting for the pop-up translator.
- *
- * The pop-up is already `alwaysOnTop` per tauri.conf.json, but a fullscreen
- * game or video regularly reclaims topmost status when it regains focus.
- * When this is on, Rust runs a background watchdog that re-asserts topmost a
- * few times a second so the card doesn't stay buried. Off by default since
- * it's a niche need and (very marginally) busier than the plain default.
+ * "Stay on top of fullscreen apps" used to live in localStorage. WebView2
+ * writes that lazily, and a tray app is killed rather than closed at a PC
+ * restart, so the switch kept coming back off. It is a field of
+ * `settings.json` now, which Rust writes atomically and applies itself at
+ * startup; this is the one-time move of the old value.
  */
-const STORAGE_KEY = "lingo.stayOnTopFullscreen";
+const LEGACY_KEY = "lingo.stayOnTopFullscreen";
 
-export function getStayOnTopFullscreen(): boolean {
-  return localStorage.getItem(STORAGE_KEY) === "1";
+/**
+ * Whether a value left in localStorage should switch the setting on. Only
+ * ever on: the default is off, so an "off" there carries nothing over, and a
+ * file that already says on is never overruled.
+ */
+export function carriesOver(legacy: string | null, current: boolean): boolean {
+  return legacy === "1" && !current;
 }
 
-export async function setStayOnTopFullscreen(enabled: boolean): Promise<void> {
-  await invoke("set_topmost_watch", { enabled });
-  localStorage.setItem(STORAGE_KEY, enabled ? "1" : "0");
-}
-
-/** Re-apply the saved setting. Safe to call on every launch. */
-export async function applySavedStayOnTopFullscreen(): Promise<void> {
-  if (!getStayOnTopFullscreen()) return;
+/** Move a leftover localStorage value into the settings file, then drop it. */
+export async function carryOverStayOnTop(s: Settings): Promise<Settings> {
+  let legacy: string | null;
   try {
-    await invoke("set_topmost_watch", { enabled: true });
-  } catch (err) {
-    console.error("Failed to re-apply stay-on-top-fullscreen:", err);
+    legacy = localStorage.getItem(LEGACY_KEY);
+  } catch {
+    return s;
   }
+  if (legacy === null) return s;
+  const next = carriesOver(legacy, s.stayOnTopFullscreen)
+    ? await saveSettings({ ...s, stayOnTopFullscreen: true })
+    : s;
+  // Only once the file has it, so a failed save is retried next launch.
+  localStorage.removeItem(LEGACY_KEY);
+  return next;
 }

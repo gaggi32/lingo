@@ -63,6 +63,9 @@ pub struct Settings {
     pub live_translate: bool,
     /// Keep the text input when the pop-up is closed and opened again.
     pub preserve_input: bool,
+    /// Keep re-asserting the pop-up's topmost status so a fullscreen game or
+    /// video can't bury it (see `set_topmost_watch` in lib.rs).
+    pub stay_on_top_fullscreen: bool,
     /// Open with the pair last used rather than with the defaults above.
     pub remember_last_lang: bool,
     /// The source last picked in a window. Empty is a real value here —
@@ -93,6 +96,7 @@ impl Default for Settings {
             save_history: true,
             live_translate: true,
             preserve_input: false,
+            stay_on_top_fullscreen: false,
             remember_last_lang: true,
             last_source_lang: String::new(),
             last_target_lang: String::new(),
@@ -329,6 +333,7 @@ mod tests {
         assert!(json.contains("checkUpdates"), "{json}");
         assert!(json.contains("liveTranslate"), "{json}");
         assert!(json.contains("preserveInput"), "{json}");
+        assert!(json.contains("stayOnTopFullscreen"), "{json}");
         assert!(json.contains("rememberLastLang"), "{json}");
         assert!(json.contains("lastTargetLang"), "{json}");
         // And nothing from either previous back end lingers.

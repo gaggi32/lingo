@@ -6,7 +6,7 @@ import UsageMeter from "./UsageMeter";
 import { errorText, getSettings, openDownloadPage, saveSettings } from "../lib/api";
 import { notifySettingsChanged } from "../lib/events";
 import { acceleratorToKeys } from "../lib/shortcut";
-import { applySavedStayOnTopFullscreen } from "../lib/topmost";
+import { carryOverStayOnTop } from "../lib/topmost";
 import { dailyCheck } from "../lib/updates";
 import {
   ClockIcon,
@@ -33,7 +33,10 @@ export default function App() {
   const [newer, setNewer] = useState<string | null>(null);
 
   useEffect(() => {
-    getSettings().then(setSettings).catch((e) => setLoadError(errorText(e)));
+    getSettings()
+      .then(carryOverStayOnTop)
+      .then(setSettings)
+      .catch((e) => setLoadError(errorText(e)));
   }, []);
 
   const checkUpdates = settings?.checkUpdates ?? false;
@@ -48,11 +51,6 @@ export default function App() {
       live = false;
     };
   }, [checkUpdates]);
-
-  // Re-apply the fullscreen-topmost watchdog, if enabled, once on launch.
-  useEffect(() => {
-    void applySavedStayOnTopFullscreen();
-  }, []);
 
   /**
    * Save and tell the other window. Rust is the single source of truth here —

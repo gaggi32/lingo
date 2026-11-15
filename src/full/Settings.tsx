@@ -30,10 +30,6 @@ import { acceleratorToKeys, eventToChord, IS_MAC } from "../lib/shortcut";
 import { isNewer, remember } from "../lib/updates";
 import { nameOf } from "../lib/languages";
 import { startPair, withDefaultPair } from "../lib/pair";
-import {
-  getStayOnTopFullscreen,
-  setStayOnTopFullscreen,
-} from "../lib/topmost";
 import { useKeyStatus } from "../lib/useKeyStatus";
 import { useLanguages } from "../lib/useLanguages";
 import type { Settings } from "../lib/types";
@@ -626,17 +622,6 @@ function TranslationSection({ settings, save }: Props) {
 // ---- Pop-up behaviour -------------------------------------------------------
 
 function PopupSection({ settings, save }: Props) {
-  const [stayOnTop, setStayOnTop] = useState(getStayOnTopFullscreen);
-
-  const toggleStayOnTop = async (next: boolean) => {
-    try {
-      await setStayOnTopFullscreen(next);
-      setStayOnTop(next);
-    } catch (err) {
-      console.error("stay-on-top toggle failed:", err);
-    }
-  };
-
   return (
     <Section title="Pop-up">
       <Row
@@ -707,8 +692,8 @@ function PopupSection({ settings, save }: Props) {
       >
         <Toggle
           label="Stay on top of fullscreen apps"
-          on={stayOnTop}
-          onChange={(v) => void toggleStayOnTop(v)}
+          on={settings.stayOnTopFullscreen}
+          onChange={(v) => void save({ ...settings, stayOnTopFullscreen: v })}
         />
       </Row>
     </Section>

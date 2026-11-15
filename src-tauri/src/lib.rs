@@ -254,6 +254,10 @@ fn save_settings(
         }
     }
 
+    if next.stay_on_top_fullscreen != previous.stay_on_top_fullscreen {
+        set_topmost_watch(&app, next.stay_on_top_fullscreen);
+    }
+
     *state.settings.lock().expect("settings mutex poisoned") = next.clone();
     Ok(next)
 }
@@ -558,15 +562,16 @@ fn resume_shortcut(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<
 /// app as fullscreen the same way. Re-asserting on an interval — the same
 /// trick overlay apps like Discord's use — makes the pop-up come back on top
 /// within a beat instead of staying buried until the other app loses focus.
-#[tauri::command]
-fn set_topmost_watch(app: AppHandle, enabled: bool) -> Result<(), String> {
+///
+/// Driven by `Settings::stay_on_top_fullscreen`: applied at startup and by
+/// [`save_settings`], never by the webview directly.
+fn set_topmost_watch(app: &AppHandle, enabled: bool) {
     app.state::<TopmostWatch>().0.store(enabled, Ordering::Relaxed);
     if enabled {
         if let Some(win) = app.get_webview_window(POP_LABEL) {
-            win.set_always_on_top(true).map_err(|e| e.to_string())?;
+            let _ = win.set_always_on_top(true);
         }
     }
-    Ok(())
 }
 
 /// Background loop backing [`set_topmost_watch`]. Sleeps between checks so it
@@ -701,7 +706,6 @@ pub fn run() {
             db_url,
             suspend_shortcut,
             resume_shortcut,
-            set_topmost_watch,
         ])
         .on_window_event(|window, event| match event {
             // Clicking away dismisses the card, the way a launcher should.
@@ -770,6 +774,8 @@ pub fn run() {
 
             let watch_flag = app.state::<TopmostWatch>().0.clone();
             spawn_topmost_watch(handle.clone(), watch_flag);
+            let stay_on_top = app.state::<AppState>().snapshot().stay_on_top_fullscreen;
+            set_topmost_watch(&handle, stay_on_top);
 
             // Re-point an existing login entry at THIS executable, so it
             // follows the install if it moves (and heals one left on a dev

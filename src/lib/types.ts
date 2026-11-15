@@ -19,6 +19,8 @@ export interface Settings {
   liveTranslate: boolean;
   /** Keep the text input when the pop-up is closed and opened again. */
   preserveInput: boolean;
+  /** Keep re-asserting the pop-up's topmost status over fullscreen apps. */
+  stayOnTopFullscreen: boolean;
   /** Open with {@link lastSourceLang}/{@link lastTargetLang} instead of the defaults above. */
   rememberLastLang: boolean;
   /** Source last picked in a window; "" is a real value ("Detect"). */
