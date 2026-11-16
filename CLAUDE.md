@@ -28,6 +28,7 @@ GitHub (update check). Sibling apps with the same shape: `C:\dev\flashcards`
 - The key never crosses IPC: no command returns it, `Settings` has no field for it. Only `secret.rs` and `google.rs` touch it.
 - Every translation goes through `translate_text`, which reserves the characters against `monthlyLimit` before calling Google. Don't add another path to Google.
 - The UI never names a URL for Rust to fetch. Links go through `open_link` (https + `LINK_HOSTS`); add a host there only if a link needs it.
+- Both windows carry the same `additionalBrowserArgs` (they share one WebView2 environment, which refuses differing options). They keep wry's defaults and turn off WebView2's occlusion throttling: without that the pop-up, shown over the desk window, froze on the first frame of its unfurl (a thin strip). Hidden windows are still throttled.
 - Keep the CSP in `tauri.conf.json` strict (`connect-src` is IPC only); Google and GitHub are called from Rust.
 - Language codes: Google's spelling. Suffixed codes Google keeps (`zh-CN`, `zh-TW`, `mni-Mtei`) must be in `REGIONAL` in `settings.rs`, or `normalise_lang` rewrites them.
 - Identifier `com.lingo.translate` and the default publisher: changing either moves the data folder, the keychain item or the NSIS install key. Don't, without a carry-over like Flashcards' `adopt_old_folders`.
