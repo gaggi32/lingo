@@ -23,6 +23,7 @@ GitHub (update check). Sibling apps with the same shape: `C:\dev\flashcards`
 - `src-tauri/src/usage.rs` — monthly tally and the spending limit (`reserve` before sending, `settle` after).
 - `src/pop/Pop.tsx` — the hotkey card. `src/full/` — desk window (Workbench, History, Settings, UsageMeter).
 - `src/lib/api.ts` — every `invoke`. `src/lib/history.ts` — SQLite history via tauri-plugin-sql.
+- `CHANGELOG.md` — bundled with `?raw` (`src/lib/releases.ts`), parsed by `src/lib/changelog.ts` for the desk window's "What's new" card (`src/full/WhatsNew.tsx`), shown once after an update; `lastSeenVersion` in `settings.json` remembers what was seen.
 
 ## Conventions
 - The key never crosses IPC: no command returns it, `Settings` has no field for it. Only `secret.rs` and `google.rs` touch it.
@@ -32,7 +33,7 @@ GitHub (update check). Sibling apps with the same shape: `C:\dev\flashcards`
 - Keep the CSP in `tauri.conf.json` strict (`connect-src` is IPC only); Google and GitHub are called from Rust.
 - Language codes: Google's spelling. Suffixed codes Google keeps (`zh-CN`, `zh-TW`, `mni-Mtei`) must be in `REGIONAL` in `settings.rs`, or `normalise_lang` rewrites them.
 - Identifier `com.lingo.translate` and the default publisher: changing either moves the data folder, the keychain item or the NSIS install key. Don't, without a carry-over like Flashcards' `adopt_old_folders`.
-- The update check reads `api.github.com/repos/gaggi32/lingo/releases/latest` (no token), so it needs the repo to be public.
+- The repo is private (Michele's decision, 2026-11-16). The update check reads `api.github.com/repos/gaggi32/lingo/releases/latest` without a token, so it can't see the releases and finds nothing: installs and updates are by hand from the release page, while signed in. No in-app updater for the same reason.
 - Version lives in three places: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`. The release job refuses a tag that does not match all three.
 
 ## Testing note
@@ -43,9 +44,10 @@ GitHub (update check). Sibling apps with the same shape: `C:\dev\flashcards`
 - Never drive the GUI while Michele may be working.
 
 ## Releasing
-Bump the three versions, commit, tag `vX.Y.Z`, push the tag. `.github/workflows/release.yml` builds Windows x64 + macOS arm64/x64, uploads installers and `.sha256` files to a draft, and publishes it from the protected `release` environment. The app's update check reads that release.
+Every release first adds its section to `CHANGELOG.md`: `## [X.Y.Z] — YYYY-MM-DD`, then `### Added / Changed / Fixed / Removed`, one line per change a user would notice (not internal names), checked against `git log --no-merges <last tag>..HEAD`. That section is the GitHub release notes and the in-app "What's new" card; the release job refuses a tag without one, and `npm test` fails when `package.json`'s version has none.
+Then bump the three versions, commit, tag `vX.Y.Z`, push the tag. `.github/workflows/release.yml` builds Windows x64 + macOS arm64/x64, uploads installers and `.sha256` files to a draft, and publishes it (the repo has no `release` environment, so the publish job runs unprotected). Actions minutes on a private repo count against the free quota, macOS ones x10.
 
 ## Only Michele can do
-- Make the repo public, and keep it public (free Actions minutes, and the update check reads releases without a token).
-- Create the `release` environment on GitHub (Settings → Environments → New environment `release`, deployment tags `v*`) before the first tag.
+- Install each release by hand (signed in to GitHub): the repo stays private, so the app can't offer it.
+- Optional: a `release` environment (Settings → Environments, deployment tags `v*`) to protect the publish step.
 - Code signing certificates (Apple Developer ID, Windows signing) if wanted.

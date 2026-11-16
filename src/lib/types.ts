@@ -31,6 +31,8 @@ export interface Settings {
   monthlyLimit: number;
   /** Ask GitHub once a day whether a newer version is out. */
   checkUpdates: boolean;
+  /** Version whose "What's new" was seen; "" until the desk window sets it. */
+  lastSeenVersion: string;
 }
 
 /** Everything the UI is told about the saved API key. */

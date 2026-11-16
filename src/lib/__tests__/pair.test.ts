@@ -17,6 +17,7 @@ const base: Settings = {
   lastTargetLang: "",
   monthlyLimit: 500_000,
   checkUpdates: true,
+  lastSeenVersion: "",
 };
 
 describe("startPair", () => {

@@ -83,6 +83,9 @@ pub struct Settings {
     pub monthly_limit: u64,
     /// Ask GitHub once a day whether a newer release is out.
     pub check_updates: bool,
+    /// The version whose "What's new" the user has seen (or that was running
+    /// when the field first appeared). Empty until the desk window sets it.
+    pub last_seen_version: String,
 }
 
 impl Default for Settings {
@@ -102,6 +105,7 @@ impl Default for Settings {
             last_target_lang: String::new(),
             monthly_limit: DEFAULT_MONTHLY_LIMIT,
             check_updates: true,
+            last_seen_version: String::new(),
         }
     }
 }
@@ -293,6 +297,7 @@ mod tests {
         assert_eq!(stored.prefs.last_target_lang, "");
         assert_eq!(stored.prefs.monthly_limit, DEFAULT_MONTHLY_LIMIT);
         assert!(stored.prefs.check_updates);
+        assert_eq!(stored.prefs.last_seen_version, "");
     }
 
     #[test]
@@ -340,6 +345,18 @@ mod tests {
         assert!(!json.contains("formality"), "{json}");
         assert!(!json.contains("machineTranslation"), "{json}");
         assert!(!json.contains("tmKey"), "{json}");
+    }
+
+    #[test]
+    fn the_last_seen_version_starts_empty_and_round_trips() {
+        // Empty means "nothing seen yet": the desk window then records the
+        // running version without showing a card.
+        assert_eq!(Settings::default().last_seen_version, "");
+        let prefs = Settings { last_seen_version: "0.2.1".into(), ..Settings::default() };
+        let json = serde_json::to_string(&Stored { api_key: String::new(), prefs }).unwrap();
+        assert!(json.contains(r#""lastSeenVersion":"0.2.1""#), "{json}");
+        let back: Stored = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.prefs.last_seen_version, "0.2.1");
     }
 
     #[test]

@@ -3,8 +3,11 @@ import Workbench from "./Workbench";
 import History from "./History";
 import SettingsPanel from "./Settings";
 import UsageMeter from "./UsageMeter";
+import WhatsNew from "./WhatsNew";
 import { errorText, getSettings, openDownloadPage, saveSettings } from "../lib/api";
+import { planWhatsNew, type ChangelogEntry } from "../lib/changelog";
 import { notifySettingsChanged } from "../lib/events";
+import { RELEASES } from "../lib/releases";
 import { acceleratorToKeys } from "../lib/shortcut";
 import { carryOverStayOnTop } from "../lib/topmost";
 import { dailyCheck } from "../lib/updates";
@@ -31,13 +34,47 @@ export default function App() {
   const [handoff, setHandoff] = useState<HistoryEntry | null>(null);
   /** A newer release on GitHub, from the once-a-day check. */
   const [newer, setNewer] = useState<string | null>(null);
+  /** CHANGELOG.md entries since the version last seen, until "Got it". */
+  const [news, setNews] = useState<{ entries: ChangelogEntry[]; more: boolean } | null>(null);
+
+  /**
+   * Save and tell the other window. Rust is the single source of truth here —
+   * it returns the settings it actually persisted, which is what we adopt.
+   */
+  const save = useCallback(async (next: Settings) => {
+    const saved = await saveSettings(next);
+    setSettings(saved);
+    await notifySettingsChanged();
+    return saved;
+  }, []);
+
+  /**
+   * Record the running version as seen. In settings.json, never localStorage,
+   * which WebView2 loses the latest writes of when the tray app is killed.
+   */
+  const markSeen = useCallback(
+    async (current: Settings) => {
+      try {
+        await save({ ...current, lastSeenVersion: __APP_VERSION__ });
+      } catch (e) {
+        console.error("Couldn't remember the version seen:", e);
+      }
+    },
+    [save],
+  );
 
   useEffect(() => {
     getSettings()
       .then(carryOverStayOnTop)
-      .then(setSettings)
+      .then((s) => {
+        setSettings(s);
+        const plan = planWhatsNew(RELEASES, s.lastSeenVersion, __APP_VERSION__);
+        if (plan.kind === "show") setNews(plan);
+        // A fresh install, or an update from before the card: no history.
+        if (plan.kind === "remember") void markSeen(s);
+      })
       .catch((e) => setLoadError(errorText(e)));
-  }, []);
+  }, [markSeen]);
 
   const checkUpdates = settings?.checkUpdates ?? false;
   useEffect(() => {
@@ -51,17 +88,6 @@ export default function App() {
       live = false;
     };
   }, [checkUpdates]);
-
-  /**
-   * Save and tell the other window. Rust is the single source of truth here —
-   * it returns the settings it actually persisted, which is what we adopt.
-   */
-  const save = useCallback(async (next: Settings) => {
-    const saved = await saveSettings(next);
-    setSettings(saved);
-    await notifySettingsChanged();
-    return saved;
-  }, []);
 
   const openInTranslator = useCallback((entry: HistoryEntry) => {
     setHandoff(entry);
@@ -148,20 +174,33 @@ export default function App() {
       </nav>
 
       {/* ---- Content ------------------------------------------------------- */}
-      <main className="min-w-0 flex-1 overflow-hidden">
-        {view === "translate" && (
-          <Workbench
-            settings={settings}
-            save={save}
-            handoff={handoff}
-            onHandoffUsed={() => setHandoff(null)}
-            onOpenSettings={() => setView("settings")}
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {news && (
+          <WhatsNew
+            version={__APP_VERSION__}
+            entries={news.entries}
+            more={news.more}
+            onDone={() => {
+              setNews(null);
+              void markSeen(settings);
+            }}
           />
         )}
-        {view === "history" && <History onOpen={openInTranslator} />}
-        {view === "settings" && (
-          <SettingsPanel settings={settings} save={save} />
-        )}
+        <div className="min-h-0 flex-1">
+          {view === "translate" && (
+            <Workbench
+              settings={settings}
+              save={save}
+              handoff={handoff}
+              onHandoffUsed={() => setHandoff(null)}
+              onOpenSettings={() => setView("settings")}
+            />
+          )}
+          {view === "history" && <History onOpen={openInTranslator} />}
+          {view === "settings" && (
+            <SettingsPanel settings={settings} save={save} />
+          )}
+        </div>
       </main>
     </div>
   );

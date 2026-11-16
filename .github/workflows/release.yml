@@ -2,7 +2,8 @@ name: Release
 
 # Push a tag vX.Y.Z (matching package.json and tauri.conf.json) to build the
 # Windows and macOS installers, attach them and their SHA-256 sums to a GitHub
-# release, then publish it. The app's update check reads that release.
+# release whose notes are that version's CHANGELOG.md section, then publish
+# it. The app's update check reads that release.
 #
 # Hardening: actions are pinned to commit SHAs; no job that runs npm or cargo
 # (third-party code) holds a write token or a persisted git credential, and no
@@ -62,12 +63,32 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      # The release notes are this version's CHANGELOG.md section; a tag
+      # without one stops here, before anything is built.
+      - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          awk -v v="$VERSION" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error file=CHANGELOG.md::CHANGELOG.md has no entry for $VERSION. Add a '## [$VERSION] — YYYY-MM-DD' section, then tag again."
+            exit 1
+          fi
+          cat release-notes.md
       - name: Create draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
-        run: gh release create "$TAG" --repo "$REPO" --draft --title "Lingo $TAG" --generate-notes
+        run: gh release create "$TAG" --repo "$REPO" --draft --title "Lingo $TAG" --notes-file release-notes.md
 
   build:
     needs: [check, create-release]
