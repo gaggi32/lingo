@@ -166,7 +166,7 @@ describe("planWhatsNew", () => {
   });
 
   it("caps the card at three versions and says there was more", () => {
-    const plan = planWhatsNew(ENTRIES, "0.1.0", "0.10.0");
+    const plan = planWhatsNew(ENTRIES, "0.1.0", "0.10.0", 3);
     expect(plan.kind === "show" && versions(plan.entries)).toEqual(["0.10.0", "0.9.0", "0.2.1"]);
     expect(plan.kind === "show" && plan.more).toBe(true);
   });

@@ -306,9 +306,14 @@ input[type="password"]::-webkit-textfield-decoration-container {
 
 /* The settings cog turns one tooth when the pointer comes onto it, and always
    finishes (the component starts it and clears it on animationend). Six
-   teeth, so 60deg ends where it began: the pointer leaving changes nothing,
-   so nothing can jump. */
-.cog-turn {
+   teeth, so 60deg ends where it began: the pointer leaving changes nothing.
+   The group inside the svg turns (CogIcon.tsx), never the svg box, so the cog
+   is never moved onto a layer of its own and cannot hop a pixel. */
+.cog-g {
+  transform-box: view-box;
+  transform-origin: center;
+}
+.cog-turn .cog-g {
   animation: cog-turn 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 @keyframes cog-turn {
@@ -316,5 +321,5 @@ input[type="password"]::-webkit-textfield-decoration-container {
   to { transform: rotate(60deg); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cog-turn { animation: none; }
+  .cog-turn .cog-g { animation: none; }
 }

@@ -29,7 +29,7 @@ export interface MissedRelease {
 }
 
 /** At most this many versions on the card; older ones become one line. */
-export const WHATS_NEW_CAP = 3;
+export const WHATS_NEW_CAP = 10;
 
 const VERSION_HEAD = /^##\s+\[v?(\d+\.\d+\.\d+)\](?:\s*[—–-]\s*(\S+))?\s*$/;
 const SECTION_HEAD = /^###\s+(.+?)\s*$/;

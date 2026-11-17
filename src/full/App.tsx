@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CogIcon } from "../components/CogIcon";
 import Workbench from "./Workbench";
 import History from "./History";
 import SettingsPanel from "./Settings";
@@ -160,7 +161,7 @@ export default function App() {
               >
                 {id === "settings" ? (
                   // Turns one tooth on hover (index.css, .cog-turn).
-                  <Icon
+                  <CogIcon
                     className={`text-[16px]${cogTurning ? " cog-turn" : ""}`}
                     onAnimationEnd={() => setCogTurning(false)}
                   />

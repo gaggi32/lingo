@@ -2,6 +2,12 @@
 
 All notable changes to Lingo. Versions from 0.2.0 on match the GitHub releases.
 
+## [1.2.2] — 2026-11-17
+### Changed
+- After an update, "What's new" lists up to ten versions you skipped, not three.
+### Fixed
+- The Settings cog no longer hops a pixel when it starts or stops turning.
+
 ## [1.2.1] — 2026-11-17
 ### Added
 - The Settings cog in the sidebar turns when you point at it.
