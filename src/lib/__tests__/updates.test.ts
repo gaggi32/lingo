@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dueForCheck, installLabel, isNewer } from "../updates";
+import { dueForCheck, installLabel, isNewer, storedNotes } from "../updates";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -42,5 +42,22 @@ describe("installLabel", () => {
     expect(installLabel("0.3.0", 0)).toBe("Downloading 0%");
     expect(installLabel("0.3.0", 42.4)).toBe("Downloading 42%");
     expect(installLabel("0.3.0", 100)).toBe("Installing…");
+  });
+});
+
+describe("storedNotes", () => {
+  const stored = JSON.stringify({ version: "1.1.0", notes: "### Added\n- New." });
+
+  it("gives the notes stored for that release", () => {
+    expect(storedNotes(stored, "1.1.0")).toBe("### Added\n- New.");
+  });
+
+  it("gives nothing for another release, none stored, or something else", () => {
+    expect(storedNotes(stored, "1.2.0")).toBeNull();
+    expect(storedNotes(null, "1.1.0")).toBeNull();
+    expect(storedNotes(JSON.stringify({ version: "1.1.0", notes: null }), "1.1.0")).toBeNull();
+    expect(storedNotes(JSON.stringify({ version: "1.1.0", notes: 3 }), "1.1.0")).toBeNull();
+    expect(storedNotes("not json", "1.1.0")).toBeNull();
+    expect(storedNotes("null", "1.1.0")).toBeNull();
   });
 });

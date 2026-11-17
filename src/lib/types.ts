@@ -87,4 +87,6 @@ export interface UpdateInfo {
   current: string;
   latest: string | null;
   newer: boolean;
+  /** The release's notes (its CHANGELOG.md section), or null when it has none. */
+  notes: string | null;
 }

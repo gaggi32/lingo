@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import packageJson from "../../../package.json?raw";
+import changelogText from "../../../CHANGELOG.md?raw";
 import {
   compareVersions,
   entriesBetween,
   parseChangelog,
+  parseReleaseNotes,
   planWhatsNew,
 } from "../changelog";
 import { RELEASES } from "../releases";
@@ -60,6 +62,20 @@ describe("parseChangelog", () => {
   it("reads Windows line endings and an empty file", () => {
     expect(parseChangelog(SAMPLE.replace(/\n/g, "\r\n"))).toEqual(ENTRIES);
     expect(parseChangelog("")).toEqual([]);
+  });
+});
+
+describe("parseReleaseNotes", () => {
+  it("reads a release body: the section without its version heading", () => {
+    const body = "### Added\n- Ten.\n### Fixed\n- A long line that\n  carries on here.\n\n";
+    expect(parseReleaseNotes(body)).toEqual(ENTRIES[0].sections);
+    expect(parseReleaseNotes(body.replace(/\n/g, "\r\n"))).toEqual(ENTRIES[0].sections);
+  });
+
+  it("leaves out loose text, items without a heading and empty headings", () => {
+    const body = "Some intro.\n- Orphan.\n### Removed\n\n### Changed\n- Kept.\n**Full log**: x";
+    expect(parseReleaseNotes(body)).toEqual([{ heading: "Changed", items: ["Kept."] }]);
+    expect(parseReleaseNotes("")).toEqual([]);
   });
 });
 
@@ -131,6 +147,18 @@ describe("the bundled CHANGELOG.md", () => {
     expect(entry, `CHANGELOG.md has no [${version}] section`).toBeDefined();
     expect(entry!.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(entry!.sections.flatMap((s) => s.items).length).toBeGreaterThan(0);
+  });
+
+  it("gives each release's notes, cut as the release job does, the card's items", () => {
+    const lines = changelogText.split(/\r?\n/);
+    for (const e of RELEASES) {
+      // release.yml: everything after "## [x.y.z]" up to the next "## [".
+      const start = lines.findIndex((l) => l.startsWith(`## [${e.version}]`));
+      const rest = lines.slice(start + 1);
+      const end = rest.findIndex((l) => l.startsWith("## ["));
+      const body = (end < 0 ? rest : rest.slice(0, end)).join("\n");
+      expect(parseReleaseNotes(body), e.version).toEqual(e.sections);
+    }
   });
 
   it("lists every version newest first, with a date and known headings", () => {

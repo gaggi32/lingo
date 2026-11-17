@@ -35,23 +35,47 @@ const ITEM = /^[-*]\s+(.+)$/;
 export function parseChangelog(text: string): ChangelogEntry[] {
   const entries: ChangelogEntry[] = [];
   let entry: ChangelogEntry | null = null;
-  let section: ChangelogSection | null = null;
+  let body: string[] = [];
+  const close = () => {
+    if (entry) entry.sections = parseSections(body);
+  };
 
   for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trimEnd();
-    if (line.startsWith("## ")) {
-      const m = VERSION_HEAD.exec(line);
+    if (raw.startsWith("## ")) {
+      close();
+      const m = VERSION_HEAD.exec(raw.trimEnd());
       entry = m ? { version: m[1], date: m[2] ?? "", sections: [] } : null;
       if (entry) entries.push(entry);
-      section = null;
+      body = [];
       continue;
     }
-    if (!entry) continue;
+    if (entry) body.push(raw);
+  }
+  close();
+  return entries;
+}
 
+/**
+ * A release's notes from GitHub: one version's CHANGELOG.md section without
+ * its `## [x.y.z]` heading, as the release job writes it. Same rules as
+ * {@link parseChangelog}; anything that is not a `###` heading or an item is
+ * left out.
+ */
+export function parseReleaseNotes(text: string): ChangelogSection[] {
+  return parseSections(text.split(/\r?\n/));
+}
+
+/** `### Heading` and the `- ` items under it, for one version's lines. */
+function parseSections(lines: string[]): ChangelogSection[] {
+  const sections: ChangelogSection[] = [];
+  let section: ChangelogSection | null = null;
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
     const head = SECTION_HEAD.exec(line);
     if (head) {
       section = { heading: head[1], items: [] };
-      entry.sections.push(section);
+      sections.push(section);
       continue;
     }
     if (!section) continue;
@@ -64,8 +88,7 @@ export function parseChangelog(text: string): ChangelogEntry[] {
     }
   }
 
-  for (const e of entries) e.sections = e.sections.filter((s) => s.items.length > 0);
-  return entries;
+  return sections.filter((s) => s.items.length > 0);
 }
 
 function parts(v: string): [number, number, number] | null {

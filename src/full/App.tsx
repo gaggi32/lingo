@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Workbench from "./Workbench";
 import History from "./History";
 import SettingsPanel from "./Settings";
 import UsageMeter from "./UsageMeter";
-import WhatsNew from "./WhatsNew";
+import WhatsNew, { ChangeSections } from "./WhatsNew";
 import {
   errorText,
   getSettings,
@@ -11,12 +11,16 @@ import {
   openDownloadPage,
   saveSettings,
 } from "../lib/api";
-import { planWhatsNew, type ChangelogEntry } from "../lib/changelog";
+import {
+  parseReleaseNotes,
+  planWhatsNew,
+  type ChangelogEntry,
+} from "../lib/changelog";
 import { notifySettingsChanged } from "../lib/events";
 import { RELEASES } from "../lib/releases";
 import { acceleratorToKeys } from "../lib/shortcut";
 import { carryOverStayOnTop } from "../lib/topmost";
-import { dailyCheck, installLabel } from "../lib/updates";
+import { dailyCheck, installLabel, type KnownUpdate } from "../lib/updates";
 import {
   ClockIcon,
   LanguagesIcon,
@@ -39,7 +43,13 @@ export default function App() {
   /** Set when History hands a row back to the translator to work on. */
   const [handoff, setHandoff] = useState<HistoryEntry | null>(null);
   /** A newer release on GitHub, from the once-a-day check. */
-  const [newer, setNewer] = useState<string | null>(null);
+  const [newer, setNewer] = useState<KnownUpdate | null>(null);
+  /** That release's notes, folded open under the sidebar notice. */
+  const [notesOpen, setNotesOpen] = useState(false);
+  const newerNotes = useMemo(
+    () => (newer?.notes ? parseReleaseNotes(newer.notes) : []),
+    [newer],
+  );
   /** CHANGELOG.md entries since the version last seen, until "Got it". */
   const [news, setNews] = useState<{ entries: ChangelogEntry[]; more: boolean } | null>(null);
 
@@ -159,7 +169,9 @@ export default function App() {
           {newer && (
             <div className="w-full rounded-lg bg-iris-50 px-2.5 py-2 text-[12px] leading-snug text-iris-700 dark:bg-iris-500/15 dark:text-iris-200">
               <p className="font-semibold">
-                {installError ? "Could not install it here." : `Lingo ${newer} is out.`}
+                {installError
+                  ? "Could not install it here."
+                  : `Lingo ${newer.version} is out.`}
               </p>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                 <button
@@ -176,7 +188,7 @@ export default function App() {
                   }}
                   className="font-medium underline-offset-2 hover:underline disabled:opacity-60"
                 >
-                  {installLabel(newer, installing)}
+                  {installLabel(newer.version, installing)}
                 </button>
                 <button
                   type="button"
@@ -185,7 +197,26 @@ export default function App() {
                 >
                   Download
                 </button>
+                {newerNotes.length > 0 && (
+                  <button
+                    type="button"
+                    aria-expanded={notesOpen}
+                    aria-controls="update-notes"
+                    onClick={() => setNotesOpen((v) => !v)}
+                    className="text-iris-600/80 underline-offset-2 hover:underline dark:text-iris-300/80"
+                  >
+                    {notesOpen ? "Hide what's new" : "What's new"}
+                  </button>
+                )}
               </div>
+              {notesOpen && newerNotes.length > 0 && (
+                <div
+                  id="update-notes"
+                  className="tidy-scroll mt-2 max-h-48 overflow-y-auto border-t border-iris-200/70 pt-1.5 pr-1 dark:border-iris-400/20"
+                >
+                  <ChangeSections sections={newerNotes} compact />
+                </div>
+              )}
             </div>
           )}
 

@@ -1,4 +1,4 @@
-import type { ChangelogEntry } from "../lib/changelog";
+import type { ChangelogEntry, ChangelogSection } from "../lib/changelog";
 
 interface Props {
   /** The running version, named in the title. */
@@ -53,18 +53,7 @@ export default function WhatsNew({ version, entries, more, onDone }: Props) {
                 )}
               </p>
             )}
-            {entry.sections.map((section) => (
-              <div key={section.heading} className="mt-1">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  {section.heading}
-                </p>
-                <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-[12.5px] leading-snug text-slate-600 marker:text-slate-300 dark:text-slate-300 dark:marker:text-slate-600">
-                  {section.items.map((item, i) => (
-                    <li key={i}>{inline(item)}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+            <ChangeSections sections={entry.sections} />
           </div>
         ))}
         {more && (
@@ -74,6 +63,48 @@ export default function WhatsNew({ version, entries, more, onDone }: Props) {
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * One version's "Added", "Fixed"… headings and their items: on the card, and
+ * for an update's notes before it is installed (Settings, and `compact` in the
+ * sidebar notice, where it takes the notice's colour).
+ */
+export function ChangeSections({
+  sections,
+  compact = false,
+}: {
+  sections: ChangelogSection[];
+  compact?: boolean;
+}) {
+  return (
+    <>
+      {sections.map((section) => (
+        <div key={section.heading} className="mt-1">
+          <p
+            className={
+              compact
+                ? "text-[10.5px] font-semibold uppercase tracking-wide opacity-75"
+                : "text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+            }
+          >
+            {section.heading}
+          </p>
+          <ul
+            className={
+              compact
+                ? "mt-0.5 list-disc space-y-0.5 pl-3.5 text-[11.5px] leading-snug marker:opacity-50"
+                : "mt-0.5 list-disc space-y-0.5 pl-4 text-[12.5px] leading-snug text-slate-600 marker:text-slate-300 dark:text-slate-300 dark:marker:text-slate-600"
+            }
+          >
+            {section.items.map((item, i) => (
+              <li key={i}>{inline(item)}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </>
   );
 }
 

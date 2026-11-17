@@ -12,6 +12,8 @@ import { checkUpdate } from "./api";
 
 const CHECKED_AT = "lingo.updateCheckedAt";
 const LATEST = "lingo.updateLatest";
+/** `{ version, notes }` of the release last found, so its notes can be shown. */
+const NOTES = "lingo.updateNotes";
 const DAY = 24 * 60 * 60 * 1000;
 
 /** Whether a day has passed since `last` (ms), or the clock went backwards. */
@@ -52,34 +54,61 @@ function write(key: string, value: string): void {
   }
 }
 
-/** A newer version already known from an earlier check, if there is one. */
-export function knownNewer(current: string): string | null {
+/** A newer release known from an earlier check: its version and notes. */
+export interface KnownUpdate {
+  version: string;
+  /** The release's notes (its CHANGELOG.md section), or null. */
+  notes: string | null;
+}
+
+/**
+ * The notes stored for `version`, or null when the stored ones are for another
+ * release or are not what {@link remember} writes.
+ */
+export function storedNotes(stored: string | null, version: string): string | null {
+  if (!stored) return null;
+  try {
+    const v: unknown = JSON.parse(stored);
+    if (typeof v !== "object" || v === null) return null;
+    const { version: of, notes } = v as Record<string, unknown>;
+    return of === version && typeof notes === "string" ? notes : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A newer release already known from an earlier check, if there is one. */
+export function knownUpdate(current: string): KnownUpdate | null {
   const latest = read(LATEST);
-  return isNewer(latest, current) ? latest : null;
+  if (!latest || !isNewer(latest, current)) return null;
+  return { version: latest, notes: storedNotes(read(NOTES), latest) };
 }
 
 /** Remember what a check found (manual or automatic). */
-export function remember(latest: string | null): void {
+export function remember(latest: string | null, notes: string | null): void {
   write(CHECKED_AT, String(Date.now()));
-  if (latest) write(LATEST, latest);
+  if (latest) {
+    write(LATEST, latest);
+    write(NOTES, JSON.stringify({ version: latest, notes }));
+  }
 }
 
 /**
  * Check GitHub if a day has passed since the last check. Resolves with a newer
- * version, or null. Never throws: an offline machine or a repo with no public
+ * release, or null. Never throws: an offline machine or a repo with no public
  * release yet is not worth bothering anyone about.
  */
-export async function dailyCheck(current: string): Promise<string | null> {
+export async function dailyCheck(current: string): Promise<KnownUpdate | null> {
   const last = read(CHECKED_AT);
   if (dueForCheck(last === null ? null : Number(last), Date.now())) {
     try {
       const info = await checkUpdate();
-      remember(info.latest);
+      remember(info.latest, info.notes);
     } catch {
       write(CHECKED_AT, String(Date.now()));
     }
   }
-  return knownNewer(current);
+  return knownUpdate(current);
 }
 
 /** The install button's text: null before it is pressed, then the progress. */

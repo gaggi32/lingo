@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   disable as disableAutostart,
   enable as enableAutostart,
@@ -28,7 +28,9 @@ import {
   verifyKey,
 } from "../lib/api";
 import { acceleratorToKeys, eventToChord, IS_MAC } from "../lib/shortcut";
-import { installLabel, isNewer, remember } from "../lib/updates";
+import { installLabel, isNewer, knownUpdate, remember } from "../lib/updates";
+import { parseReleaseNotes } from "../lib/changelog";
+import { ChangeSections } from "./WhatsNew";
 import { nameOf } from "../lib/languages";
 import { startPair, withDefaultPair } from "../lib/pair";
 import { useKeyStatus } from "../lib/useKeyStatus";
@@ -868,9 +870,19 @@ function SystemSection() {
 // ---- About ------------------------------------------------------------------
 
 function UpdateRow({ settings, save }: Props) {
+  // A newer release the daily check already found shows here at once, as it
+  // does in the sidebar.
+  const [known] = useState(() =>
+    settings.checkUpdates ? knownUpdate(__APP_VERSION__) : null,
+  );
   const [state, setState] = useState<"idle" | "checking" | "done">("idle");
-  const [message, setMessage] = useState("");
-  const [newer, setNewer] = useState<string | null>(null);
+  const [message, setMessage] = useState(
+    known ? `Lingo ${known.version} is out.` : "",
+  );
+  const [newer, setNewer] = useState<string | null>(known?.version ?? null);
+  /** The newer release's notes (its CHANGELOG.md section), shown before installing. */
+  const [notes, setNotes] = useState<string | null>(known?.notes ?? null);
+  const sections = useMemo(() => (notes ? parseReleaseNotes(notes) : []), [notes]);
   /** While an update downloads: percent, or -1 while the size is unknown. */
   const [installing, setInstalling] = useState<number | null>(null);
 
@@ -891,9 +903,10 @@ function UpdateRow({ settings, save }: Props) {
     setMessage("");
     try {
       const info = await checkUpdate();
-      remember(info.latest);
+      remember(info.latest, info.notes);
       const found = isNewer(info.latest, __APP_VERSION__);
       setNewer(found ? info.latest : null);
+      setNotes(found ? info.notes : null);
       setMessage(
         found
           ? `Lingo ${info.latest} is out.`
@@ -901,6 +914,7 @@ function UpdateRow({ settings, save }: Props) {
       );
     } catch (err) {
       setNewer(null);
+      setNotes(null);
       setMessage(errorText(err));
     }
     setState("done");
@@ -910,7 +924,7 @@ function UpdateRow({ settings, save }: Props) {
     <Section title="Updates">
       <Row
         label="Check for updates"
-        description="Once a day, Lingo asks GitHub for the version number of its newest release. Nothing else is sent, and nothing is downloaded until you press Install."
+        description="Once a day, Lingo asks GitHub for the version number and notes of its newest release. Nothing else is sent, and nothing is downloaded until you press Install."
       >
         <Toggle
           label="Check for updates"
@@ -955,6 +969,18 @@ function UpdateRow({ settings, save }: Props) {
           </>
         )}
       </div>
+      {newer && sections.length > 0 && (
+        <div className="px-4 py-3">
+          <p className="text-[13.5px] font-medium">What&apos;s new in {newer}</p>
+          <div className="tidy-scroll mt-1.5 max-h-56 overflow-y-auto pr-1">
+            <ChangeSections sections={sections} />
+          </div>
+          <p className="mt-2 text-[12px] leading-snug text-slate-500 dark:text-slate-400">
+            Install downloads it from GitHub, checks it is signed by Lingo,
+            installs it and restarts Lingo. Your key, settings and history stay.
+          </p>
+        </div>
+      )}
     </Section>
   );
 }

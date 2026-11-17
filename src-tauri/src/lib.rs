@@ -453,6 +453,9 @@ struct UpdateInfo {
     current: String,
     latest: Option<String>,
     newer: bool,
+    /// The release's notes: its CHANGELOG.md section, which the release job
+    /// writes as the release body. Shown before installing.
+    notes: Option<String>,
 }
 
 fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
@@ -472,6 +475,17 @@ fn release_version(body: &serde_json::Value) -> Option<String> {
     (v.len() <= 20 && parse_version(v).is_some()).then(|| v.to_string())
 }
 
+/// At most this many characters of a release's notes cross to the UI.
+const NOTES_MAX: usize = 8000;
+
+/// The notes in a GitHub release answer ("body"), cut to [`NOTES_MAX`]
+/// characters; none when the release has no notes.
+fn release_notes(body: &serde_json::Value) -> Option<String> {
+    let text = body.get("body")?.as_str()?;
+    let notes: String = text.chars().take(NOTES_MAX).collect();
+    (!notes.trim().is_empty()).then_some(notes)
+}
+
 fn is_newer(latest: Option<&str>, current: &str) -> bool {
     match (latest.and_then(parse_version), parse_version(current)) {
         (Some(l), Some(c)) => l > c,
@@ -479,8 +493,8 @@ fn is_newer(latest: Option<&str>, current: &str) -> bool {
     }
 }
 
-/// Ask GitHub for the newest published release of Lingo. Only its version is
-/// read, and no key or text goes with the request; installing is
+/// Ask GitHub for the newest published release of Lingo. Only its version and
+/// notes are read, and no key or text goes with the request; installing is
 /// [`install_update`], or the user's own download.
 #[tauri::command]
 async fn check_update(
@@ -508,10 +522,12 @@ async fn check_update(
         .map_err(|_| "Unexpected answer from GitHub.".to_string())?;
     let latest = release_version(&body);
     let newer = is_newer(latest.as_deref(), &current);
+    let notes = release_notes(&body);
     Ok(UpdateInfo {
         current,
         latest,
         newer,
+        notes,
     })
 }
 
@@ -913,5 +929,17 @@ mod tests {
         let odd = serde_json::json!({ "tag_name": "nightly" });
         assert_eq!(release_version(&odd), None);
         assert_eq!(release_version(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn a_release_answer_gives_its_notes_within_the_limit() {
+        let body = serde_json::json!({ "body": "### Added\n- Something new.\n" });
+        assert_eq!(release_notes(&body), Some("### Added\n- Something new.\n".into()));
+        assert_eq!(release_notes(&serde_json::json!({ "body": "  \n " })), None);
+        assert_eq!(release_notes(&serde_json::json!({ "body": null })), None);
+        assert_eq!(release_notes(&serde_json::json!({})), None);
+        let long = "é".repeat(NOTES_MAX + 50);
+        let cut = release_notes(&serde_json::json!({ "body": long })).unwrap();
+        assert_eq!(cut.chars().count(), NOTES_MAX);
     }
 }
