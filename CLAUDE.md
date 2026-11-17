@@ -23,7 +23,7 @@ GitHub (update check). Sibling apps with the same shape: `C:\dev\flashcards`
 - `src-tauri/src/usage.rs` — monthly tally and the spending limit (`reserve` before sending, `settle` after).
 - `src/pop/Pop.tsx` — the hotkey card. `src/full/` — desk window (Workbench, History, Settings, UsageMeter).
 - `src/lib/api.ts` — every `invoke`. `src/lib/history.ts` — SQLite history via tauri-plugin-sql.
-- `CHANGELOG.md` — bundled with `?raw` (`src/lib/releases.ts`), parsed by `src/lib/changelog.ts` for the desk window's "What's new" card (`src/full/WhatsNew.tsx`), shown once after an update; `lastSeenVersion` in `settings.json` remembers what was seen. Before an update, the newer release's notes (the same section, as the GitHub release body, from `check_update`) go through `parseReleaseNotes` and `ChangeSections` into Settings → Updates and the sidebar notice; `updates.ts` caches them in localStorage beside the version.
+- `CHANGELOG.md` — bundled with `?raw` (`src/lib/releases.ts`), parsed by `src/lib/changelog.ts` for the desk window's "What's new" card (`src/full/WhatsNew.tsx`), shown once after an update; `lastSeenVersion` in `settings.json` remembers what was seen. Before an update, every release newer than the running one (`missed` from `check_update`: version + GitHub body, newest first, from `releases?per_page=20`, falling back to the latest alone) goes through `missedEntries` and `ReleaseEntries` into Settings → Updates and the sidebar notice; `updates.ts` caches them in localStorage beside the version.
 
 ## Conventions
 - The key never crosses IPC: no command returns it, `Settings` has no field for it. Only `secret.rs` and `google.rs` touch it.

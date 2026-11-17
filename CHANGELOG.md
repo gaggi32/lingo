@@ -2,6 +2,10 @@
 
 All notable changes to Lingo. Versions from 0.2.0 on match the GitHub releases.
 
+## [1.2.0] — 2026-11-17
+### Changed
+- Before you install an update, its notes list every version you would get, not only the newest.
+
 ## [1.1.0] — 2026-11-17
 ### Added
 - Settings and the update notice show what is new in an update before you install it.
