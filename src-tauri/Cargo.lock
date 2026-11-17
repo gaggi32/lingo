@@ -2573,7 +2573,7 @@ dependencies = [
 
 [[package]]
 name = "lingo"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "keyring",
  "reqwest 0.12.28",

@@ -1,7 +1,7 @@
 {
   "name": "lingo",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "module",
   "description": "Lingo — a cross-platform pop-up translator powered by the Google Cloud Translation API (Tauri v2 + React).",
   "scripts": {
