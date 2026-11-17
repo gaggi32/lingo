@@ -976,7 +976,7 @@ function UpdateRow({ settings, save }: Props) {
               ? `What's new since ${__APP_VERSION__}`
               : `What's new in ${newer}`}
           </p>
-          <div className="tidy-scroll mt-1.5 max-h-56 space-y-2.5 overflow-y-auto pr-1">
+          <div className="tidy-scroll mt-2 max-h-80 overflow-y-auto pr-1">
             <ReleaseEntries entries={entries} />
           </div>
           <p className="mt-2 text-[12px] leading-snug text-slate-500 dark:text-slate-400">

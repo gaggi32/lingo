@@ -303,3 +303,18 @@ input[type="password"]::-webkit-textfield-decoration-container {
   width: 0;
   margin: 0;
 }
+
+/* The settings cog turns one tooth when the pointer comes onto it, and always
+   finishes (the component starts it and clears it on animationend). Six
+   teeth, so 60deg ends where it began: the pointer leaving changes nothing,
+   so nothing can jump. */
+.cog-turn {
+  animation: cog-turn 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes cog-turn {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(60deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cog-turn { animation: none; }
+}

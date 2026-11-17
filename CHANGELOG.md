@@ -2,6 +2,12 @@
 
 All notable changes to Lingo. Versions from 0.2.0 on match the GitHub releases.
 
+## [1.2.1] — 2026-11-17
+### Added
+- The Settings cog in the sidebar turns when you point at it.
+### Changed
+- The "What's new" card and the update notes are easier to read: coloured New, Improved and Fixed labels, a bullet per change, and older versions folded to one line each.
+
 ## [1.2.0] — 2026-11-17
 ### Changed
 - Before you install an update, its notes list every version you would get, not only the newest.

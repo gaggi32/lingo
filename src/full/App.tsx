@@ -39,6 +39,8 @@ const NAV: { id: View; label: string; Icon: typeof LanguagesIcon }[] = [
 export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [view, setView] = useState<View>("translate");
+  /** The settings cog's one-tooth turn on hover is running. */
+  const [cogTurning, setCogTurning] = useState(false);
   const [loadError, setLoadError] = useState("");
   /** Set when History hands a row back to the translator to work on. */
   const [handoff, setHandoff] = useState<HistoryEntry | null>(null);
@@ -148,6 +150,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setView(id)}
+                onPointerEnter={id === "settings" ? () => setCogTurning(true) : undefined}
                 className={[
                   "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors",
                   view === id
@@ -155,7 +158,15 @@ export default function App() {
                     : "text-slate-600 hover:bg-slate-900/[0.05] dark:text-slate-400 dark:hover:bg-white/5",
                 ].join(" ")}
               >
-                <Icon className="text-[16px]" />
+                {id === "settings" ? (
+                  // Turns one tooth on hover (index.css, .cog-turn).
+                  <Icon
+                    className={`text-[16px]${cogTurning ? " cog-turn" : ""}`}
+                    onAnimationEnd={() => setCogTurning(false)}
+                  />
+                ) : (
+                  <Icon className="text-[16px]" />
+                )}
                 {label}
               </button>
             </li>
@@ -209,7 +220,7 @@ export default function App() {
               {notesOpen && newerNotes.length > 0 && (
                 <div
                   id="update-notes"
-                  className="tidy-scroll mt-2 max-h-48 space-y-2 overflow-y-auto border-t border-iris-200/70 pt-1.5 pr-1 dark:border-iris-400/20"
+                  className="tidy-scroll mt-2 max-h-64 overflow-y-auto border-t border-iris-200/70 pt-1.5 pr-1 dark:border-iris-400/20"
                 >
                   <ReleaseEntries entries={newerNotes} compact />
                 </div>
