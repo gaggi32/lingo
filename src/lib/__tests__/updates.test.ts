@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dueForCheck, installLabel, isNewer, storedNotes } from "../updates";
+import { dueForCheck, installLabel, isNewer, storedMissed } from "../updates";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -45,19 +45,39 @@ describe("installLabel", () => {
   });
 });
 
-describe("storedNotes", () => {
-  const stored = JSON.stringify({ version: "1.1.0", notes: "### Added\n- New." });
+describe("storedMissed", () => {
+  const missed = [
+    { version: "1.2.0", notes: "### Added\n- Newer." },
+    { version: "1.1.0", notes: null },
+  ];
+  const stored = JSON.stringify({ version: "1.2.0", missed });
 
-  it("gives the notes stored for that release", () => {
-    expect(storedNotes(stored, "1.1.0")).toBe("### Added\n- New.");
+  it("gives the releases stored for that release", () => {
+    expect(storedMissed(stored, "1.2.0")).toEqual(missed);
+  });
+
+  it("reads what was stored before, the newest release's notes alone", () => {
+    const old = JSON.stringify({ version: "1.1.0", notes: "### Added\n- New." });
+    expect(storedMissed(old, "1.1.0")).toEqual([
+      { version: "1.1.0", notes: "### Added\n- New." },
+    ]);
+    expect(storedMissed(JSON.stringify({ version: "1.1.0", notes: null }), "1.1.0")).toEqual([]);
+    expect(storedMissed(JSON.stringify({ version: "1.1.0", notes: 3 }), "1.1.0")).toEqual([]);
+  });
+
+  it("drops entries of the wrong shape", () => {
+    const odd = JSON.stringify({
+      version: "1.2.0",
+      missed: [{ version: "1.2.0", notes: "ok" }, { version: 5, notes: "x" }, { notes: "x" }, { version: "1.1.0", notes: 3 }, null],
+    });
+    expect(storedMissed(odd, "1.2.0")).toEqual([{ version: "1.2.0", notes: "ok" }]);
   });
 
   it("gives nothing for another release, none stored, or something else", () => {
-    expect(storedNotes(stored, "1.2.0")).toBeNull();
-    expect(storedNotes(null, "1.1.0")).toBeNull();
-    expect(storedNotes(JSON.stringify({ version: "1.1.0", notes: null }), "1.1.0")).toBeNull();
-    expect(storedNotes(JSON.stringify({ version: "1.1.0", notes: 3 }), "1.1.0")).toBeNull();
-    expect(storedNotes("not json", "1.1.0")).toBeNull();
-    expect(storedNotes("null", "1.1.0")).toBeNull();
+    expect(storedMissed(stored, "1.3.0")).toEqual([]);
+    expect(storedMissed(null, "1.1.0")).toEqual([]);
+    expect(storedMissed("not json", "1.1.0")).toEqual([]);
+    expect(storedMissed("null", "1.1.0")).toEqual([]);
+    expect(storedMissed(JSON.stringify({ version: "1.2.0", missed: "x" }), "1.2.0")).toEqual([]);
   });
 });

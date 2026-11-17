@@ -1,3 +1,5 @@
+import type { MissedRelease } from "./changelog";
+
 /**
  * Mirrors `Settings` in src-tauri/src/settings.rs (serialised camelCase).
  *
@@ -87,6 +89,9 @@ export interface UpdateInfo {
   current: string;
   latest: string | null;
   newer: boolean;
-  /** The release's notes (its CHANGELOG.md section), or null when it has none. */
-  notes: string | null;
+  /**
+   * Every release the update brings, newest first, each with its notes (its
+   * CHANGELOG.md section, or null); empty when there is nothing newer.
+   */
+  missed: MissedRelease[];
 }

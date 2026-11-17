@@ -15,9 +15,6 @@ interface Props {
  * that is for translating, and the desk window is where an update is noticed.
  */
 export default function WhatsNew({ version, entries, more, onDone }: Props) {
-  // One version needs no sub-heading; the title already names it.
-  const several = entries.length > 1;
-
   return (
     <section
       aria-labelledby="whats-new-title"
@@ -40,22 +37,7 @@ export default function WhatsNew({ version, entries, more, onDone }: Props) {
       </div>
 
       <div className="tidy-scroll mt-2 max-h-44 space-y-2.5 overflow-y-auto pr-1">
-        {entries.map((entry) => (
-          <div key={entry.version}>
-            {several && (
-              <p className="text-[12px] font-semibold text-slate-700 dark:text-slate-200">
-                {entry.version}
-                {entry.date && (
-                  <span className="font-normal text-slate-400 dark:text-slate-500">
-                    {" "}
-                    · {entry.date}
-                  </span>
-                )}
-              </p>
-            )}
-            <ChangeSections sections={entry.sections} />
-          </div>
-        ))}
+        <ReleaseEntries entries={entries} />
         {more && (
           <p className="text-[12px] text-slate-400 dark:text-slate-500">
             …and earlier changes.
@@ -63,6 +45,52 @@ export default function WhatsNew({ version, entries, more, onDone }: Props) {
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * Versions newest first, each under a small version heading with its
+ * sections: on the card, and for every release an update brings before it is
+ * installed (Settings, and `compact` in the sidebar notice). One version needs
+ * no heading; the title around it already names it. Put it in a `space-y-*` box.
+ */
+export function ReleaseEntries({
+  entries,
+  compact = false,
+}: {
+  entries: ChangelogEntry[];
+  compact?: boolean;
+}) {
+  const several = entries.length > 1;
+  return (
+    <>
+      {entries.map((entry) => (
+        <div key={entry.version}>
+          {several && (
+            <p
+              className={
+                compact
+                  ? "text-[11.5px] font-semibold"
+                  : "text-[12px] font-semibold text-slate-700 dark:text-slate-200"
+              }
+            >
+              {entry.version}
+              {entry.date && (
+                <span
+                  className={
+                    compact ? "font-normal opacity-60" : "font-normal text-slate-400 dark:text-slate-500"
+                  }
+                >
+                  {" "}
+                  · {entry.date}
+                </span>
+              )}
+            </p>
+          )}
+          <ChangeSections sections={entry.sections} compact={compact} />
+        </div>
+      ))}
+    </>
   );
 }
 

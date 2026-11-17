@@ -29,8 +29,8 @@ import {
 } from "../lib/api";
 import { acceleratorToKeys, eventToChord, IS_MAC } from "../lib/shortcut";
 import { installLabel, isNewer, knownUpdate, remember } from "../lib/updates";
-import { parseReleaseNotes } from "../lib/changelog";
-import { ChangeSections } from "./WhatsNew";
+import { missedEntries, type MissedRelease } from "../lib/changelog";
+import { ReleaseEntries } from "./WhatsNew";
 import { nameOf } from "../lib/languages";
 import { startPair, withDefaultPair } from "../lib/pair";
 import { useKeyStatus } from "../lib/useKeyStatus";
@@ -880,9 +880,9 @@ function UpdateRow({ settings, save }: Props) {
     known ? `Lingo ${known.version} is out.` : "",
   );
   const [newer, setNewer] = useState<string | null>(known?.version ?? null);
-  /** The newer release's notes (its CHANGELOG.md section), shown before installing. */
-  const [notes, setNotes] = useState<string | null>(known?.notes ?? null);
-  const sections = useMemo(() => (notes ? parseReleaseNotes(notes) : []), [notes]);
+  /** Every release the update brings, with its notes, shown before installing. */
+  const [missed, setMissed] = useState<MissedRelease[]>(known?.missed ?? []);
+  const entries = useMemo(() => missedEntries(missed), [missed]);
   /** While an update downloads: percent, or -1 while the size is unknown. */
   const [installing, setInstalling] = useState<number | null>(null);
 
@@ -903,10 +903,10 @@ function UpdateRow({ settings, save }: Props) {
     setMessage("");
     try {
       const info = await checkUpdate();
-      remember(info.latest, info.notes);
+      remember(info.latest, info.missed);
       const found = isNewer(info.latest, __APP_VERSION__);
       setNewer(found ? info.latest : null);
-      setNotes(found ? info.notes : null);
+      setMissed(found ? info.missed : []);
       setMessage(
         found
           ? `Lingo ${info.latest} is out.`
@@ -914,7 +914,7 @@ function UpdateRow({ settings, save }: Props) {
       );
     } catch (err) {
       setNewer(null);
-      setNotes(null);
+      setMissed([]);
       setMessage(errorText(err));
     }
     setState("done");
@@ -924,7 +924,7 @@ function UpdateRow({ settings, save }: Props) {
     <Section title="Updates">
       <Row
         label="Check for updates"
-        description="Once a day, Lingo asks GitHub for the version number and notes of its newest release. Nothing else is sent, and nothing is downloaded until you press Install."
+        description="Once a day, Lingo asks GitHub for the version numbers and notes of its newest releases. Nothing else is sent, and nothing is downloaded until you press Install."
       >
         <Toggle
           label="Check for updates"
@@ -969,11 +969,15 @@ function UpdateRow({ settings, save }: Props) {
           </>
         )}
       </div>
-      {newer && sections.length > 0 && (
+      {newer && entries.length > 0 && (
         <div className="px-4 py-3">
-          <p className="text-[13.5px] font-medium">What&apos;s new in {newer}</p>
-          <div className="tidy-scroll mt-1.5 max-h-56 overflow-y-auto pr-1">
-            <ChangeSections sections={sections} />
+          <p className="text-[13.5px] font-medium">
+            {entries.length > 1
+              ? `What's new since ${__APP_VERSION__}`
+              : `What's new in ${newer}`}
+          </p>
+          <div className="tidy-scroll mt-1.5 max-h-56 space-y-2.5 overflow-y-auto pr-1">
+            <ReleaseEntries entries={entries} />
           </div>
           <p className="mt-2 text-[12px] leading-snug text-slate-500 dark:text-slate-400">
             Install downloads it from GitHub, checks it is signed by Lingo,

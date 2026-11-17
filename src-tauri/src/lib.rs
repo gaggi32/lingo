@@ -64,6 +64,9 @@ const KEY_CHANGED: &str = "key-changed";
 /// Where a new version is downloaded, and where the update check asks.
 const DOWNLOAD_PAGE: &str = "https://github.com/gaggi32/lingo/releases/latest";
 const LATEST_RELEASE: &str = "https://api.github.com/repos/gaggi32/lingo/releases/latest";
+/// The recent releases, newest first: read only when a newer one is out, for
+/// the notes of every version the update brings.
+const RELEASE_LIST: &str = "https://api.github.com/repos/gaggi32/lingo/releases?per_page=20";
 
 /// Hosts a link in the UI may open in the default browser. Everything else is
 /// refused, and the webviews themselves never navigate away from the app.
@@ -453,8 +456,17 @@ struct UpdateInfo {
     current: String,
     latest: Option<String>,
     newer: bool,
-    /// The release's notes: its CHANGELOG.md section, which the release job
-    /// writes as the release body. Shown before installing.
+    /// Every release an update brings (newer than `current`, up to `latest`),
+    /// newest first; empty when there is nothing newer. Shown before installing.
+    missed: Vec<MissedRelease>,
+}
+
+/// One release an update brings and its notes: its CHANGELOG.md section,
+/// which the release job writes as the release body.
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct MissedRelease {
+    version: String,
     notes: Option<String>,
 }
 
@@ -486,6 +498,71 @@ fn release_notes(body: &serde_json::Value) -> Option<String> {
     (!notes.trim().is_empty()).then_some(notes)
 }
 
+/// At most this many releases' notes cross to the UI.
+const MISSED_MAX: usize = 10;
+
+fn flag(release: &serde_json::Value, key: &str) -> bool {
+    release
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// The releases in a GitHub release list (`list`, any JSON) newer than
+/// `current` and up to `latest`, newest first, at most [`MISSED_MAX`]. Drafts,
+/// prereleases and tags that are not x.y.z are skipped. The newest is always
+/// `latest` with `latest_notes` (from the "latest" answer itself), so a list
+/// that failed or lacks it still gives what the update check gave before.
+fn missed_releases(
+    list: &serde_json::Value,
+    current: &str,
+    latest: &str,
+    latest_notes: Option<String>,
+) -> Vec<MissedRelease> {
+    let (Some(from), Some(to)) = (parse_version(current), parse_version(latest)) else {
+        return Vec::new();
+    };
+    let mut found: Vec<((u64, u64, u64), MissedRelease)> = list
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|r| !flag(r, "draft") && !flag(r, "prerelease"))
+        .filter_map(|r| {
+            let version = release_version(r)?;
+            let v = parse_version(&version)?;
+            (v > from && v < to).then(|| {
+                let notes = release_notes(r);
+                (v, MissedRelease { version, notes })
+            })
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.dedup_by(|a, b| a.0 == b.0);
+    let newest = MissedRelease {
+        version: latest.to_string(),
+        notes: latest_notes,
+    };
+    std::iter::once(newest)
+        .chain(found.into_iter().map(|(_, r)| r))
+        .take(MISSED_MAX)
+        .collect()
+}
+
+/// The recent releases ([`RELEASE_LIST`]), or none when GitHub can't be asked.
+async fn release_list(http: &reqwest::Client) -> Option<serde_json::Value> {
+    let res = http
+        .get(RELEASE_LIST)
+        .header("Accept", "application/vnd.github+json")
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    res.json().await.ok()
+}
+
 fn is_newer(latest: Option<&str>, current: &str) -> bool {
     match (latest.and_then(parse_version), parse_version(current)) {
         (Some(l), Some(c)) => l > c,
@@ -493,8 +570,9 @@ fn is_newer(latest: Option<&str>, current: &str) -> bool {
     }
 }
 
-/// Ask GitHub for the newest published release of Lingo. Only its version and
-/// notes are read, and no key or text goes with the request; installing is
+/// Ask GitHub for the newest published release of Lingo and, when it is
+/// newer, the releases since the running one. Only versions and notes are
+/// read, and no key or text goes with the request; installing is
 /// [`install_update`], or the user's own download.
 #[tauri::command]
 async fn check_update(
@@ -522,12 +600,20 @@ async fn check_update(
         .map_err(|_| "Unexpected answer from GitHub.".to_string())?;
     let latest = release_version(&body);
     let newer = is_newer(latest.as_deref(), &current);
-    let notes = release_notes(&body);
+    let missed = match latest.as_deref() {
+        Some(l) if newer => {
+            let list = release_list(&state.http)
+                .await
+                .unwrap_or(serde_json::Value::Null);
+            missed_releases(&list, &current, l, release_notes(&body))
+        }
+        _ => Vec::new(),
+    };
     Ok(UpdateInfo {
         current,
         latest,
         newer,
-        notes,
+        missed,
     })
 }
 
@@ -941,5 +1027,65 @@ mod tests {
         let long = "é".repeat(NOTES_MAX + 50);
         let cut = release_notes(&serde_json::json!({ "body": long })).unwrap();
         assert_eq!(cut.chars().count(), NOTES_MAX);
+    }
+
+    #[test]
+    fn missed_releases_are_those_since_the_running_one() {
+        use serde_json::json;
+        let r = |tag: &str, body: &str| {
+            json!({ "tag_name": tag, "body": body, "draft": false, "prerelease": false })
+        };
+        let list = json!([
+            r("v1.5.0", "### Added\n- Ahead."),
+            r("v1.4.0", "### Added\n- Latest from the list."),
+            { "tag_name": "v1.3.5", "body": "draft", "draft": true, "prerelease": false },
+            { "tag_name": "v1.3.6", "body": "beta", "draft": false, "prerelease": true },
+            r("v1.2.0", "### Fixed\n- Two."),
+            r("v1.3.0", "### Added\n- Three."),
+            r("nightly", "odd"),
+            r("v1.1.0", "### Added\n- Running."),
+            r("v1.0.0", "### Added\n- Older."),
+            { "tag_name": "v1.2.5", "body": null },
+            5,
+        ]);
+        let got = missed_releases(&list, "1.1.0", "1.4.0", Some("### Added\n- Latest.".into()));
+        let versions: Vec<&str> = got.iter().map(|m| m.version.as_str()).collect();
+        assert_eq!(versions, ["1.4.0", "1.3.0", "1.2.5", "1.2.0"]);
+        // The newest's notes come from the "latest" answer, the rest from the list.
+        assert_eq!(got[0].notes.as_deref(), Some("### Added\n- Latest."));
+        assert_eq!(got[1].notes.as_deref(), Some("### Added\n- Three."));
+        assert_eq!(got[2].notes, None);
+    }
+
+    #[test]
+    fn missed_releases_fall_back_to_the_latest_alone() {
+        use serde_json::{json, Value};
+        let only = |list: &Value| missed_releases(list, "1.0.0", "1.1.0", Some("n".into()));
+        let latest = vec![MissedRelease {
+            version: "1.1.0".into(),
+            notes: Some("n".into()),
+        }];
+        assert_eq!(only(&Value::Null), latest);
+        assert_eq!(only(&json!({ "message": "rate limited" })), latest);
+        assert_eq!(only(&json!([])), latest);
+        assert!(missed_releases(&json!([]), "1.0.0", "garbage", None).is_empty());
+    }
+
+    #[test]
+    fn missed_releases_are_capped_and_deduplicated() {
+        use serde_json::{json, Value};
+        let list: Vec<Value> = (1..=20)
+            .flat_map(|i| {
+                [
+                    json!({ "tag_name": format!("v1.{i}.0") }),
+                    json!({ "tag_name": format!("1.{i}.0") }),
+                ]
+            })
+            .collect();
+        let got = missed_releases(&Value::Array(list), "1.0.0", "1.20.0", None);
+        assert_eq!(got.len(), MISSED_MAX);
+        let versions: Vec<String> = got.iter().map(|m| m.version.clone()).collect();
+        let want: Vec<String> = (11..=20).rev().map(|i| format!("1.{i}.0")).collect();
+        assert_eq!(versions, want);
     }
 }

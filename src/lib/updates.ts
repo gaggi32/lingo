@@ -1,4 +1,5 @@
 import { checkUpdate } from "./api";
+import type { MissedRelease } from "./changelog";
 
 /**
  * The once-a-day update check.
@@ -12,7 +13,10 @@ import { checkUpdate } from "./api";
 
 const CHECKED_AT = "lingo.updateCheckedAt";
 const LATEST = "lingo.updateLatest";
-/** `{ version, notes }` of the release last found, so its notes can be shown. */
+/**
+ * `{ version, missed }` of the release last found, so the notes of every
+ * release it brings can be shown. Before 1.2 it was `{ version, notes }`.
+ */
 const NOTES = "lingo.updateNotes";
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -54,26 +58,36 @@ function write(key: string, value: string): void {
   }
 }
 
-/** A newer release known from an earlier check: its version and notes. */
+/** A newer release known from an earlier check: its version and what it brings. */
 export interface KnownUpdate {
   version: string;
-  /** The release's notes (its CHANGELOG.md section), or null. */
-  notes: string | null;
+  /** Every release it brings, newest first, with its notes (see `check_update`). */
+  missed: MissedRelease[];
+}
+
+function isMissedRelease(m: unknown): m is MissedRelease {
+  if (typeof m !== "object" || m === null) return false;
+  const { version, notes } = m as Record<string, unknown>;
+  return typeof version === "string" && (typeof notes === "string" || notes === null);
 }
 
 /**
- * The notes stored for `version`, or null when the stored ones are for another
- * release or are not what {@link remember} writes.
+ * The releases stored for `version`, or none when the stored ones are for
+ * another release or are not what {@link remember} writes. The shape written
+ * before 1.2 (`{ version, notes }`, the newest release only) still reads, as
+ * that one release.
  */
-export function storedNotes(stored: string | null, version: string): string | null {
-  if (!stored) return null;
+export function storedMissed(stored: string | null, version: string): MissedRelease[] {
+  if (!stored) return [];
   try {
     const v: unknown = JSON.parse(stored);
-    if (typeof v !== "object" || v === null) return null;
-    const { version: of, notes } = v as Record<string, unknown>;
-    return of === version && typeof notes === "string" ? notes : null;
+    if (typeof v !== "object" || v === null) return [];
+    const { version: of, missed, notes } = v as Record<string, unknown>;
+    if (of !== version) return [];
+    if (Array.isArray(missed)) return missed.filter(isMissedRelease);
+    return typeof notes === "string" ? [{ version, notes }] : [];
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -81,15 +95,15 @@ export function storedNotes(stored: string | null, version: string): string | nu
 export function knownUpdate(current: string): KnownUpdate | null {
   const latest = read(LATEST);
   if (!latest || !isNewer(latest, current)) return null;
-  return { version: latest, notes: storedNotes(read(NOTES), latest) };
+  return { version: latest, missed: storedMissed(read(NOTES), latest) };
 }
 
 /** Remember what a check found (manual or automatic). */
-export function remember(latest: string | null, notes: string | null): void {
+export function remember(latest: string | null, missed: MissedRelease[]): void {
   write(CHECKED_AT, String(Date.now()));
   if (latest) {
     write(LATEST, latest);
-    write(NOTES, JSON.stringify({ version: latest, notes }));
+    write(NOTES, JSON.stringify({ version: latest, missed }));
   }
 }
 
@@ -103,7 +117,7 @@ export async function dailyCheck(current: string): Promise<KnownUpdate | null> {
   if (dueForCheck(last === null ? null : Number(last), Date.now())) {
     try {
       const info = await checkUpdate();
-      remember(info.latest, info.notes);
+      remember(info.latest, info.missed);
     } catch {
       write(CHECKED_AT, String(Date.now()));
     }

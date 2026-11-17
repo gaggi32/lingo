@@ -4,6 +4,7 @@ import changelogText from "../../../CHANGELOG.md?raw";
 import {
   compareVersions,
   entriesBetween,
+  missedEntries,
   parseChangelog,
   parseReleaseNotes,
   planWhatsNew,
@@ -76,6 +77,52 @@ describe("parseReleaseNotes", () => {
     const body = "Some intro.\n- Orphan.\n### Removed\n\n### Changed\n- Kept.\n**Full log**: x";
     expect(parseReleaseNotes(body)).toEqual([{ heading: "Changed", items: ["Kept."] }]);
     expect(parseReleaseNotes("")).toEqual([]);
+  });
+});
+
+describe("missedEntries", () => {
+  it("gives every release an update brings, newest first, with its sections", () => {
+    const missed = [
+      { version: "1.2.0", notes: "### Fixed\r\n- Two." },
+      { version: "1.3.0", notes: "### Added\n- Three.\n### Fixed\n- Three, too." },
+      { version: "1.1.0", notes: "### Added\n- One." },
+    ];
+    expect(missedEntries(missed)).toEqual([
+      {
+        version: "1.3.0",
+        date: "",
+        sections: [
+          { heading: "Added", items: ["Three."] },
+          { heading: "Fixed", items: ["Three, too."] },
+        ],
+      },
+      { version: "1.2.0", date: "", sections: [{ heading: "Fixed", items: ["Two."] }] },
+      { version: "1.1.0", date: "", sections: [{ heading: "Added", items: ["One."] }] },
+    ]);
+  });
+
+  it("leaves out releases with nothing to show, repeats and odd shapes", () => {
+    const missed = [
+      { version: "1.3.0", notes: "### Added\n- Three." },
+      { version: "1.3.0", notes: "### Added\n- Again." },
+      { version: "1.2.0", notes: null },
+      { version: "1.1.5", notes: "No sections." },
+      { version: "nightly", notes: "### Added\n- Odd." },
+      { version: 5, notes: "### Added\n- Odd." },
+      { notes: "### Added\n- No version." },
+      null,
+      "1.0.0",
+    ];
+    expect(missedEntries(missed).map((e) => e.version)).toEqual(["1.3.0"]);
+    expect(missedEntries(missed)[0].sections[0].items).toEqual(["Three."]);
+  });
+
+  it("is empty for anything but a list", () => {
+    expect(missedEntries(undefined)).toEqual([]);
+    expect(missedEntries(null)).toEqual([]);
+    expect(missedEntries("### Added\n- One.")).toEqual([]);
+    expect(missedEntries({ version: "1.0.0", notes: "### Added\n- One." })).toEqual([]);
+    expect(missedEntries([])).toEqual([]);
   });
 });
 

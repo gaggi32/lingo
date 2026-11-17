@@ -3,7 +3,7 @@ import Workbench from "./Workbench";
 import History from "./History";
 import SettingsPanel from "./Settings";
 import UsageMeter from "./UsageMeter";
-import WhatsNew, { ChangeSections } from "./WhatsNew";
+import WhatsNew, { ReleaseEntries } from "./WhatsNew";
 import {
   errorText,
   getSettings,
@@ -12,7 +12,7 @@ import {
   saveSettings,
 } from "../lib/api";
 import {
-  parseReleaseNotes,
+  missedEntries,
   planWhatsNew,
   type ChangelogEntry,
 } from "../lib/changelog";
@@ -44,12 +44,9 @@ export default function App() {
   const [handoff, setHandoff] = useState<HistoryEntry | null>(null);
   /** A newer release on GitHub, from the once-a-day check. */
   const [newer, setNewer] = useState<KnownUpdate | null>(null);
-  /** That release's notes, folded open under the sidebar notice. */
+  /** The notes of every release it brings, folded open under the sidebar notice. */
   const [notesOpen, setNotesOpen] = useState(false);
-  const newerNotes = useMemo(
-    () => (newer?.notes ? parseReleaseNotes(newer.notes) : []),
-    [newer],
-  );
+  const newerNotes = useMemo(() => missedEntries(newer?.missed), [newer]);
   /** CHANGELOG.md entries since the version last seen, until "Got it". */
   const [news, setNews] = useState<{ entries: ChangelogEntry[]; more: boolean } | null>(null);
 
@@ -212,9 +209,9 @@ export default function App() {
               {notesOpen && newerNotes.length > 0 && (
                 <div
                   id="update-notes"
-                  className="tidy-scroll mt-2 max-h-48 overflow-y-auto border-t border-iris-200/70 pt-1.5 pr-1 dark:border-iris-400/20"
+                  className="tidy-scroll mt-2 max-h-48 space-y-2 overflow-y-auto border-t border-iris-200/70 pt-1.5 pr-1 dark:border-iris-400/20"
                 >
-                  <ChangeSections sections={newerNotes} compact />
+                  <ReleaseEntries entries={newerNotes} compact />
                 </div>
               )}
             </div>
