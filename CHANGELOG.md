@@ -2,6 +2,12 @@
 
 All notable changes to Lingo. Versions from 0.2.0 on match the GitHub releases.
 
+## [0.3.0] — 2026-11-17
+### Added
+- Install updates from inside Lingo: "Install" in the sidebar notice or in Settings downloads the new version, checks it is signed by Lingo, installs it and restarts. Your key, settings and history stay. (This version itself is the last one to install by hand.)
+### Changed
+- Lingo's code is public on GitHub, so the update check now finds new versions.
+
 ## [0.2.2] — 2026-11-16
 ### Added
 - "What's new": after an update, the main window shows what changed since the version you had.
