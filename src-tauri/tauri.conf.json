@@ -97,11 +97,22 @@
       "minimumSystemVersion": "11.0",
       "signingIdentity": "-"
     },
+    "createUpdaterArtifacts": true,
     "linux": {
       "deb": {
         "section": "utils"
       }
     }
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU3NTZFRkE1MDU3MEE3REIKUldUYnAzQUZwZTlXVngvSWtrNnBkVXdHOFVWNjNlUlY5UEJWSzZJTjVlUjNVNjBxQUtsV2xra0wK",
+      "endpoints": [
+        "https://github.com/gaggi32/lingo/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
 }

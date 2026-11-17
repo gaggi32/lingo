@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   KeyStatus,
   Language,
@@ -82,6 +83,21 @@ export const openDownloadPage = (): Promise<void> => invoke("open_download_page"
 
 /** Ask GitHub for the newest release. Sends nothing but the request itself. */
 export const checkUpdate = (): Promise<UpdateInfo> => invoke("check_update");
+
+/**
+ * Download the newest release, check it is signed with Lingo's release key,
+ * install it and restart. `onProgress` gets the percent downloaded, or -1
+ * while the size is unknown. Only returns on a failure: on success the app
+ * restarts.
+ */
+export async function installUpdate(onProgress: (pct: number) => void): Promise<void> {
+  const off = await listen<number>("update-progress", (e) => onProgress(e.payload));
+  try {
+    await invoke<void>("install_update");
+  } finally {
+    off();
+  }
+}
 
 /** Whatever a rejected `invoke` threw, as a sentence worth showing. */
 export function errorText(err: unknown): string {

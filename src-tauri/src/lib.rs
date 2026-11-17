@@ -480,8 +480,8 @@ fn is_newer(latest: Option<&str>, current: &str) -> bool {
 }
 
 /// Ask GitHub for the newest published release of Lingo. Only its version is
-/// read, and no key or text goes with the request; installing is always the
-/// user's own download.
+/// read, and no key or text goes with the request; installing is
+/// [`install_update`], or the user's own download.
 #[tauri::command]
 async fn check_update(
     app: AppHandle,
@@ -513,6 +513,40 @@ async fn check_update(
         latest,
         newer,
     })
+}
+
+/// Download the newest release, check its signature against the key built
+/// into this app (tauri.conf.json, plugins.updater.pubkey), install it and
+/// restart. Anything not signed with the release key is refused. Progress goes
+/// out as "update-progress" (0-100, or -1 while the size is unknown). Only the
+/// main window may ask.
+#[tauri::command]
+async fn install_update(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() != MAIN_LABEL {
+        return Err("Only the main window can install updates.".into());
+    }
+    use tauri_plugin_updater::UpdaterExt;
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| format!("Could not check for the update: {e}"))?
+        .ok_or("There is no newer version to install.")?;
+    let mut done: usize = 0;
+    let progress = app.clone();
+    update
+        .download_and_install(
+            move |chunk, total| {
+                done += chunk;
+                let pct = total.map_or(-1, |t| if t == 0 { -1 } else { (done as u64 * 100 / t) as i64 });
+                let _ = progress.emit("update-progress", pct);
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| format!("Could not install the update: {e}"))?;
+    app.restart();
 }
 
 #[tauri::command]
@@ -664,6 +698,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -700,6 +735,7 @@ pub fn run() {
             open_link,
             open_download_page,
             check_update,
+            install_update,
             max_characters,
             hide_pop,
             open_desk,

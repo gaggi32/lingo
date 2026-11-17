@@ -33,7 +33,7 @@ GitHub (update check). Sibling apps with the same shape: `C:\dev\flashcards`
 - Keep the CSP in `tauri.conf.json` strict (`connect-src` is IPC only); Google and GitHub are called from Rust.
 - Language codes: Google's spelling. Suffixed codes Google keeps (`zh-CN`, `zh-TW`, `mni-Mtei`) must be in `REGIONAL` in `settings.rs`, or `normalise_lang` rewrites them.
 - Identifier `com.lingo.translate` and the default publisher: changing either moves the data folder, the keychain item or the NSIS install key. Don't, without a carry-over like Flashcards' `adopt_old_folders`.
-- The repo is private (Michele's decision, 2026-11-16). The update check reads `api.github.com/repos/gaggi32/lingo/releases/latest` without a token, so it can't see the releases and finds nothing: installs and updates are by hand from the release page, while signed in. No in-app updater for the same reason.
+- The repo is public (since 2026-11-17; recreated that day so no pre-rewrite commits remain). The update check reads `api.github.com/repos/gaggi32/lingo/releases/latest` without a token, and the in-app updater (`install_update`, main window only) reads `releases/latest/download/latest.json`, so both need the repo public.
 - Version lives in three places: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`. The release job refuses a tag that does not match all three.
 
 ## Testing note
@@ -45,9 +45,10 @@ GitHub (update check). Sibling apps with the same shape: `C:\dev\flashcards`
 
 ## Releasing
 Every release first adds its section to `CHANGELOG.md`: `## [X.Y.Z] — YYYY-MM-DD`, then `### Added / Changed / Fixed / Removed`, one line per change a user would notice (not internal names), checked against `git log --no-merges <last tag>..HEAD`. That section is the GitHub release notes and the in-app "What's new" card; the release job refuses a tag without one, and `npm test` fails when `package.json`'s version has none.
-Then bump the three versions, commit, tag `vX.Y.Z`, push the tag. `.github/workflows/release.yml` builds Windows x64 + macOS arm64/x64, uploads installers and `.sha256` files to a draft, and publishes it (the repo has no `release` environment, so the publish job runs unprotected). Actions minutes on a private repo count against the free quota, macOS ones x10.
+Then bump the three versions, commit, tag `vX.Y.Z`, push the tag. `.github/workflows/release.yml` builds Windows x64 + macOS arm64/x64, signs each build for the updater, uploads installers, `.sha256`, `.sig` and `latest.json` to a draft, and publishes it in the `release` environment (deployment tags `v*`).
+Updater key: `C:\Users\miche\.tauri\lingo-updater.key` and `.password` (never in the repo or the vault), stored as repo secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the public key is `plugins.updater.pubkey` in `tauri.conf.json`. Without the secrets the build fails. Builds signed with another key are refused by installed apps, so losing it means everyone installs by hand once more.
 
 ## Only Michele can do
-- Install each release by hand (signed in to GitHub): the repo stays private, so the app can't offer it.
-- Optional: a `release` environment (Settings → Environments, deployment tags `v*`) to protect the publish step.
+- Keep the repo public (the update check and the updater read its releases without a token).
+- Keep a backup of the updater key and its password (a password manager), and set the two repo secrets from them.
 - Code signing certificates (Apple Developer ID, Windows signing) if wanted.

@@ -19,6 +19,7 @@ import {
   checkUpdate,
   clearApiKey,
   errorText,
+  installUpdate,
   openDownloadPage,
   openLink,
   resumeShortcut,
@@ -27,7 +28,7 @@ import {
   verifyKey,
 } from "../lib/api";
 import { acceleratorToKeys, eventToChord, IS_MAC } from "../lib/shortcut";
-import { isNewer, remember } from "../lib/updates";
+import { installLabel, isNewer, remember } from "../lib/updates";
 import { nameOf } from "../lib/languages";
 import { startPair, withDefaultPair } from "../lib/pair";
 import { useKeyStatus } from "../lib/useKeyStatus";
@@ -869,7 +870,21 @@ function SystemSection() {
 function UpdateRow({ settings, save }: Props) {
   const [state, setState] = useState<"idle" | "checking" | "done">("idle");
   const [message, setMessage] = useState("");
-  const [newer, setNewer] = useState(false);
+  const [newer, setNewer] = useState<string | null>(null);
+  /** While an update downloads: percent, or -1 while the size is unknown. */
+  const [installing, setInstalling] = useState<number | null>(null);
+
+  const install = async (version: string) => {
+    setInstalling(-1);
+    setMessage(`Installing Lingo ${version}…`);
+    try {
+      // Restarts the app when it is done, so this only returns on a failure.
+      await installUpdate(setInstalling);
+    } catch (err) {
+      setMessage(`${errorText(err)} You can still get it from the download page.`);
+      setInstalling(null);
+    }
+  };
 
   const check = async () => {
     setState("checking");
@@ -878,14 +893,14 @@ function UpdateRow({ settings, save }: Props) {
       const info = await checkUpdate();
       remember(info.latest);
       const found = isNewer(info.latest, __APP_VERSION__);
-      setNewer(found);
+      setNewer(found ? info.latest : null);
       setMessage(
         found
           ? `Lingo ${info.latest} is out.`
           : `You have the newest version (${__APP_VERSION__}).`,
       );
     } catch (err) {
-      setNewer(false);
+      setNewer(null);
       setMessage(errorText(err));
     }
     setState("done");
@@ -895,7 +910,7 @@ function UpdateRow({ settings, save }: Props) {
     <Section title="Updates">
       <Row
         label="Check for updates"
-        description="Once a day, Lingo asks GitHub for the version number of its newest release. Nothing else is sent, and installing is always your own download."
+        description="Once a day, Lingo asks GitHub for the version number of its newest release. Nothing else is sent, and nothing is downloaded until you press Install."
       >
         <Toggle
           label="Check for updates"
@@ -919,14 +934,25 @@ function UpdateRow({ settings, save }: Props) {
           <span className="text-slate-500 dark:text-slate-400">{message}</span>
         )}
         {newer && (
-          <button
-            type="button"
-            onClick={() => void openDownloadPage()}
-            className="inline-flex items-center gap-1 font-medium text-iris-600 hover:text-iris-700 dark:text-iris-300"
-          >
-            Download
-            <ExternalIcon className="text-[12px]" />
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => void install(newer)}
+              disabled={installing !== null}
+              className="rounded-md bg-iris-600 px-2.5 py-1 font-medium text-white transition-colors hover:bg-iris-700 disabled:opacity-60 dark:bg-iris-500 dark:hover:bg-iris-400"
+            >
+              {installLabel(newer, installing)}
+            </button>
+            <button
+              type="button"
+              onClick={() => void openDownloadPage()}
+              title="The release page on GitHub, to download the installer yourself"
+              className="inline-flex items-center gap-1 font-medium text-iris-600 hover:text-iris-700 dark:text-iris-300"
+            >
+              Download page
+              <ExternalIcon className="text-[12px]" />
+            </button>
+          </>
         )}
       </div>
     </Section>
@@ -955,8 +981,10 @@ function AboutSection({ settings, save }: Props) {
         </p>
         <p>
           The text you translate goes to Google and nowhere else; the only
-          other request Lingo makes is the update check above, to GitHub, which
-          carries no text and no key. Google states that Cloud Translation does not
+          other requests Lingo makes are the update check above, to GitHub, which
+          carries no text and no key, and, when you press Install, the download
+          of that release from GitHub. An update not signed with Lingo&apos;s
+          release key is refused. Google states that Cloud Translation does not
           use your content to train its models — which is the main way it
           differs from the free consumer endpoint — but it is still someone
           else&apos;s server, so treat it accordingly.

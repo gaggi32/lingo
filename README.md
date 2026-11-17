@@ -145,7 +145,9 @@ translation on its own.
   which kept it in `settings.json`: it is moved over on the first start.)
 - **Update check:** once a day Lingo asks GitHub for the version number of its
   newest release. No text and no key go with it, and you can turn it off in
-  Settings. Installing an update is always your own download.
+  Settings. **Install** downloads that release from GitHub, checks it is signed
+  with Lingo's release key (anything else is refused), installs it and
+  restarts; **Download** opens the release page if you'd rather do it yourself.
 - **Links** in the app open in your browser, and only for Google Cloud and
   GitHub pages. The app loads no web pages of its own.
 - **On your computer:** `settings.json` (preferences) and `usage.json` (this

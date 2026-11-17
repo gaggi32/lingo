@@ -5,8 +5,9 @@ import { checkUpdate } from "./api";
  *
  * Rust asks GitHub for the newest release (nothing else is sent); this module
  * decides when to ask and remembers the answer, so the desk window can show a
- * notice without asking again on every launch. Installing is always the
- * user's own download from the releases page.
+ * notice without asking again on every launch. Installing is either in the
+ * app (installUpdate in api.ts) or the user's own download from the releases
+ * page.
  */
 
 const CHECKED_AT = "lingo.updateCheckedAt";
@@ -79,4 +80,12 @@ export async function dailyCheck(current: string): Promise<string | null> {
     }
   }
   return knownNewer(current);
+}
+
+/** The install button's text: null before it is pressed, then the progress. */
+export function installLabel(version: string, progress: number | null): string {
+  if (progress === null) return `Install ${version}`;
+  if (progress < 0) return "Downloading…";
+  if (progress >= 100) return "Installing…";
+  return `Downloading ${Math.round(progress)}%`;
 }

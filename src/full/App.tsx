@@ -4,13 +4,19 @@ import History from "./History";
 import SettingsPanel from "./Settings";
 import UsageMeter from "./UsageMeter";
 import WhatsNew from "./WhatsNew";
-import { errorText, getSettings, openDownloadPage, saveSettings } from "../lib/api";
+import {
+  errorText,
+  getSettings,
+  installUpdate,
+  openDownloadPage,
+  saveSettings,
+} from "../lib/api";
 import { planWhatsNew, type ChangelogEntry } from "../lib/changelog";
 import { notifySettingsChanged } from "../lib/events";
 import { RELEASES } from "../lib/releases";
 import { acceleratorToKeys } from "../lib/shortcut";
 import { carryOverStayOnTop } from "../lib/topmost";
-import { dailyCheck } from "../lib/updates";
+import { dailyCheck, installLabel } from "../lib/updates";
 import {
   ClockIcon,
   LanguagesIcon,
@@ -75,6 +81,10 @@ export default function App() {
       })
       .catch((e) => setLoadError(errorText(e)));
   }, [markSeen]);
+
+  /** While the update downloads: percent, or -1 while the size is unknown. */
+  const [installing, setInstalling] = useState<number | null>(null);
+  const [installError, setInstallError] = useState(false);
 
   const checkUpdates = settings?.checkUpdates ?? false;
   useEffect(() => {
@@ -147,14 +157,36 @@ export default function App() {
 
         <div className="mt-auto space-y-3 px-1 pt-4">
           {newer && (
-            <button
-              type="button"
-              onClick={() => void openDownloadPage()}
-              className="w-full rounded-lg bg-iris-50 px-2.5 py-2 text-left text-[12px] leading-snug text-iris-700 transition-colors hover:bg-iris-100 dark:bg-iris-500/15 dark:text-iris-200 dark:hover:bg-iris-500/25"
-            >
-              <span className="font-semibold">Lingo {newer} is out.</span>{" "}
-              Download it from GitHub.
-            </button>
+            <div className="w-full rounded-lg bg-iris-50 px-2.5 py-2 text-[12px] leading-snug text-iris-700 dark:bg-iris-500/15 dark:text-iris-200">
+              <p className="font-semibold">
+                {installError ? "Could not install it here." : `Lingo ${newer} is out.`}
+              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <button
+                  type="button"
+                  disabled={installing !== null}
+                  onClick={() => {
+                    setInstalling(-1);
+                    setInstallError(false);
+                    // Restarts the app when done: only a failure comes back.
+                    installUpdate(setInstalling).catch(() => {
+                      setInstalling(null);
+                      setInstallError(true);
+                    });
+                  }}
+                  className="font-medium underline-offset-2 hover:underline disabled:opacity-60"
+                >
+                  {installLabel(newer, installing)}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void openDownloadPage()}
+                  className="text-iris-600/80 underline-offset-2 hover:underline dark:text-iris-300/80"
+                >
+                  Download
+                </button>
+              </div>
+            </div>
           )}
 
           <UsageMeter />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dueForCheck, isNewer } from "../updates";
+import { dueForCheck, installLabel, isNewer } from "../updates";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -29,5 +29,18 @@ describe("isNewer", () => {
     expect(isNewer(null, "0.2.0")).toBe(false);
     expect(isNewer("nightly", "0.2.0")).toBe(false);
     expect(isNewer("1.0", "0.2.0")).toBe(false);
+  });
+});
+
+describe("installLabel", () => {
+  it("offers the version until pressed", () => {
+    expect(installLabel("0.3.0", null)).toBe("Install 0.3.0");
+  });
+
+  it("shows the download, then the install", () => {
+    expect(installLabel("0.3.0", -1)).toBe("Downloading…");
+    expect(installLabel("0.3.0", 0)).toBe("Downloading 0%");
+    expect(installLabel("0.3.0", 42.4)).toBe("Downloading 42%");
+    expect(installLabel("0.3.0", 100)).toBe("Installing…");
   });
 });
