@@ -48,6 +48,8 @@ Every release first adds its section to `CHANGELOG.md`: `## [X.Y.Z] — YYYY-MM-
 Then bump the three versions, commit, tag `vX.Y.Z`, push the tag. `.github/workflows/release.yml` builds Windows x64 + macOS arm64/x64, signs each build for the updater, uploads installers, `.sha256`, `.sig` and `latest.json` to a draft, and publishes it in the `release` environment (deployment tags `v*`).
 Updater key: `C:\Users\miche\.tauri\lingo-updater.key` and `.password` (never in the repo or the vault), stored as repo secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the public key is `plugins.updater.pubkey` in `tauri.conf.json`. Without the secrets the build fails. Builds signed with another key are refused by installed apps, so losing it means everyone installs by hand once more.
 
+After it is published, point the 404canvas download page (404canvas.ch/projects/lingo) at it: `C:\devĄcanvas\privateelease-lingo.json` (version, the three asset URLs, SHA-256 from the release's `.sha256` files), commit "release: Lingo vX.Y.Z", push.
+
 ## Only Michele can do
 - Keep the repo public (the update check and the updater read its releases without a token).
 - Keep a backup of the updater key and its password (a password manager), and set the two repo secrets from them.
